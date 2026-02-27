@@ -4,6 +4,17 @@ pub type RefLexer<'lex> = &'lex mut Lexer<'lex>;
 
 pub type ParserFn<'lex, T, E> = fn(lex: RefLexer) -> Parser<T, E>;
 
+#[macro_export]
+/// The `?` operator for [`Parser`]
+macro_rules! try_parse {
+    ($f:expr) => {
+        match $f {
+            Parser::Success(lexer, expr) => (lexer, expr),
+            Parser::Fail(lexer, e) => return Parser::Fail(lexer, e),
+        }
+    };
+}
+
 pub enum Parser<'lex, T, E> {
     Success(RefLexer<'lex>, T),
     Fail(RefLexer<'lex>, E),
@@ -30,10 +41,10 @@ impl<'lex, T, E> Parser<'lex, T, E> {
         }
     }
 
-    pub fn success(self) -> Result<T, E> {
+    pub fn success(self) -> Result<T, (RefLexer<'lex>, E)> {
         match self {
             Parser::Success(_, e) => Ok(e),
-            Parser::Fail(_, e) => Err(e),
+            Parser::Fail(lex, e) => Err((lex, e)),
         }
     }
 }
