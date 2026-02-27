@@ -1,4 +1,3 @@
-#![allow(unused)]
 use std::fmt;
 
 pub struct Lexer<'src> {
@@ -66,6 +65,11 @@ impl<'src> Lexer<'src> {
                     continue;
                 }
                 '#' => {
+                    let ch = self.read_char();
+                    if self.byte_pos == 1 && ch == '!' {
+                        while self.advance() != '\n' {}
+                        continue;
+                    }
                     loop {
                         let ch = self.read_char();
                         if ch.is_alphanumeric() || ch == '_' {
@@ -322,19 +326,6 @@ impl<'src> Lexer<'src> {
             }
         }
         let ident = &self.source[begin_byte..self.byte_pos];
-        match ident {
-            "fn" => kind = TokenKind::FnKeyword,
-            "do" => kind = TokenKind::DoKeyword,
-            "end" => kind = TokenKind::EndKeyword,
-            "type" => kind = TokenKind::TypeKeyword,
-            "if" => kind = TokenKind::IfKeyword,
-            "then" => kind = TokenKind::ThenKeyword,
-            "else" => kind = TokenKind::ElseKeyword,
-            "int" => kind = TokenKind::IntType,
-            "string" => kind = TokenKind::StringType,
-            "bool" => kind = TokenKind::BoolType,
-            _ => {}
-        }
         Token::new(kind, loc, ident.into())
     }
 
@@ -582,13 +573,6 @@ pub enum TokenKind {
     CloseCurly,
 
     Identifier,
-    FnKeyword,
-    DoKeyword,
-    EndKeyword,
-    TypeKeyword,
-    IfKeyword,
-    ThenKeyword,
-    ElseKeyword,
 
     Directive,
 
@@ -633,10 +617,6 @@ pub enum TokenKind {
     UInt(NumberBase),
     UInt64(NumberBase),
     Int(NumberBase),
-
-    IntType,
-    StringType,
-    BoolType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
