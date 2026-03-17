@@ -156,14 +156,6 @@ impl<'src> Lexer<'src> {
                         self.source[begin_byte..self.byte_pos].into(),
                     )
                 }
-                '+' if self.read_char() == '+' => {
-                    self.advance();
-                    Token::new(
-                        TokenKind::Concat,
-                        loc,
-                        self.source[begin_byte..self.byte_pos].into(),
-                    )
-                }
                 '.' if self.read_char() == '.' && self.read_char() == '.' => {
                     self.advance();
                     self.advance();
@@ -217,36 +209,110 @@ impl<'src> Lexer<'src> {
                     loc,
                     self.source[begin_byte..self.byte_pos].into(),
                 ),
-                '+' => Token::new(
-                    TokenKind::Plus,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '-' => Token::new(
-                    TokenKind::Minus,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
+                '+' => {
+                    let next = self.read_char();
+                    if next == '+' {
+                        self.advance();
+                        Token::new(
+                            TokenKind::Concat,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        )
+                    } else if next == '=' {
+                        self.advance();
+                        Token::new(
+                            TokenKind::PlusEq,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        )
+                    } else {
+                        Token::new(
+                            TokenKind::Plus,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        )
+                    }
+                }
+                '-' => {
+                    let next = self.read_char();
+                    if next == '>' {
+                        self.advance();
+                        Token::new(
+                            TokenKind::Arrow,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        )
+                    } else if next == '=' {
+                        self.advance();
+                        Token::new(
+                            TokenKind::MinusEq,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        )
+                    } else {
+                        Token::new(
+                            TokenKind::Minus,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        )
+                    }
+                }
                 '.' => Token::new(
                     TokenKind::Dot,
                     loc,
                     self.source[begin_byte..self.byte_pos].into(),
                 ),
-                '*' => Token::new(
-                    TokenKind::Asterisk,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '/' => Token::new(
-                    TokenKind::Slash,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '%' => Token::new(
-                    TokenKind::Mod,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
+                '*' => {
+                    let next = self.read_char();
+                    if next == '=' {
+                        self.advance();
+                        Token::new(
+                            TokenKind::AsteriskEq,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        )
+                    } else {
+                        Token::new(
+                            TokenKind::Asterisk,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        )
+                    }
+                }
+                '/' => {
+                    let next = self.read_char();
+                    if next == '=' {
+                        self.advance();
+                        Token::new(
+                            TokenKind::SlashEq,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        )
+                    } else {
+                        Token::new(
+                            TokenKind::Slash,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        )
+                    }
+                }
+                '%' => {
+                    let next = self.read_char();
+                    if next == '=' {
+                        self.advance();
+                        Token::new(
+                            TokenKind::ModEq,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        )
+                    } else {
+                        Token::new(
+                            TokenKind::Mod,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        )
+                    }
+                }
                 '$' => Token::new(
                     TokenKind::Dollar,
                     loc,
@@ -316,6 +382,7 @@ impl<'src> Lexer<'src> {
 
     fn lex_identfier(&mut self, begin_byte: usize) -> Token {
         let loc = self.loc;
+        #[allow(unused_mut)]
         let mut kind = TokenKind::Identifier;
         loop {
             let ch = self.read_char();
@@ -326,19 +393,13 @@ impl<'src> Lexer<'src> {
             }
         }
         let ident = &self.source[begin_byte..self.byte_pos];
+        match ident {
+            // add keywords here
+            // "var" => TokenKind::Var,
+            _ => {}
+        }
         Token::new(kind, loc, ident.into())
     }
-
-    // fn lex_number(&mut self, begin_byte: usize) -> Token {
-    //     let loc = self.loc;
-    //     let kind = TokenKind::IntegerNumber;
-
-    //     while let '0'..='9' = self.read_char() {
-    //         self.advance();
-    //     }
-
-    //     Token::new(kind, loc, self.source[begin_byte..self.byte_pos].into())
-    // }
 
     fn lex_number(&mut self, begin_byte: usize) -> Token {
         let loc = self.loc;
@@ -573,6 +634,8 @@ pub enum TokenKind {
     CloseCurly,
 
     Identifier,
+    // add keywords here
+    // Var,
 
     Directive,
 
@@ -590,6 +653,11 @@ pub enum TokenKind {
     BackSlash,
 
     Assign,
+    PlusEq,
+    MinusEq,
+    AsteriskEq,
+    SlashEq,
+    ModEq,
     Bang,
     Plus,
     Concat,
@@ -626,6 +694,16 @@ pub enum NumberBase {
     D,
     X,
 }
+impl NumberBase {
+    pub fn radix(&self) -> u32 {
+        match self {
+            NumberBase::B => 2,
+            NumberBase::O => 8,
+            NumberBase::D => 10,
+            NumberBase::X => 16,
+        }
+    }
+}
 
 impl From<u32> for NumberBase {
     fn from(value: u32) -> Self {
@@ -659,7 +737,16 @@ impl TokenKind {
     }
 
     pub fn is_assign_kind(&self) -> bool {
-        matches!(self, Self::Assign)
+        matches!(
+            self,
+            Self::Assign
+                | Self::Eq
+                | Self::PlusEq
+                | Self::MinusEq
+                | Self::AsteriskEq
+                | Self::SlashEq
+                | Self::ModEq
+        )
     }
 }
 
