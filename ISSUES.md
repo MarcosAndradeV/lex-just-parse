@@ -12,4 +12,4 @@ Refactor the `Lexer` to support injecting custom keywords dynamically. Potential
 - Implementing a generic approach mapping specific string literals to a `TokenKind::Keyword(String)` variant.
 - Providing a builder pattern: `Lexer::builder().with_keyword("let", TokenKind::Let).build()`.
 
-**Status:** Needs to be resolved before publishing to `crates.io`.
+**Status:** ✅ Resolved. The Lexer now supports a `with_keywords(&["a", "b"])` configuration method, avoiding the need to fork the crate.

@@ -15,6 +15,7 @@ pub struct Lexer<'src> {
     byte_pos: usize,
     loc: Loc,
     peeked: Option<Token>,
+    keywords: Vec<&'src str>,
 }
 
 impl<'src> Lexer<'src> {
@@ -27,7 +28,14 @@ impl<'src> Lexer<'src> {
             pos: 0,
             byte_pos: 0,
             peeked: None,
+            keywords: Vec::new(),
         }
+    }
+
+    /// Configures the lexer with a set of predefined keywords to recognize.
+    pub fn with_keywords(mut self, keywords: &[&'src str]) -> Self {
+        self.keywords = keywords.to_vec();
+        self
     }
 
     /// Returns the next token in the stream, consuming it in the process.
@@ -178,7 +186,7 @@ impl<'src> Lexer<'src> {
                         self.source[begin_byte..self.byte_pos].into(),
                     )
                 }
-                ch if ch.is_alphabetic() || ch == '_' => return self.lex_identfier(begin_byte),
+                ch if ch.is_alphabetic() || ch == '_' => return self.lex_identifier(begin_byte),
                 '0'..='9' => return self.lex_number(begin_byte),
                 '"' => return self.lex_string(begin_byte),
 
@@ -393,7 +401,7 @@ impl<'src> Lexer<'src> {
         Token::new(TokenKind::EOF, self.loc, "".into())
     }
 
-    fn lex_identfier(&mut self, begin_byte: usize) -> Token {
+    fn lex_identifier(&mut self, begin_byte: usize) -> Token {
         let loc = self.loc;
         #[allow(unused_mut)]
         let mut kind = TokenKind::Identifier;
@@ -406,11 +414,11 @@ impl<'src> Lexer<'src> {
             }
         }
         let ident = &self.source[begin_byte..self.byte_pos];
-        match ident {
-            // add keywords here
-            // "var" => TokenKind::Var,
-            _ => {}
+        
+        if self.keywords.contains(&ident) {
+            kind = TokenKind::Keyword;
         }
+
         Token::new(kind, loc, ident.into())
     }
 
@@ -653,8 +661,7 @@ pub enum TokenKind {
     CloseCurly,
 
     Identifier,
-    // add keywords here
-    // Var,
+    Keyword,
 
     Directive,
 

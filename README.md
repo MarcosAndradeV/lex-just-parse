@@ -18,7 +18,9 @@ use lex_just_parse::lexer::{Lexer, TokenKind};
 
 fn main() {
     let source = "var x = 42;";
-    let mut lexer = Lexer::new(source);
+    
+    // Initialize the lexer and configure accepted keywords
+    let mut lexer = Lexer::new(source).with_keywords(&["var", "let", "fn"]);
 
     // Consume tokens until EOF
     loop {
@@ -33,6 +35,6 @@ fn main() {
 }
 ```
 
-## Note on Publishing
+## Publishing Status
 
-Currently, this library is intended for local project usage and is not available on `crates.io`. If you need to add custom keywords to the language (e.g., `let`, `fn`, `var`), you must manually modify the `lex_identfier` method in `src/lexer.rs`. A refactor to support dynamic keyword configuration is planned before public release.
+This library is currently used across local projects but is fully configurable for standalone usage. The lexical analyzer previously required hardcoding keywords, but it has since been updated to support dynamic custom keywords via the `Lexer::with_keywords()` builder method, making it suitable for generic language parsing.
