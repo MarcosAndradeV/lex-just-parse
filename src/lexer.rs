@@ -1,5 +1,13 @@
+//! Provides lexical analysis features.
+//! 
+//! This module contains the `Lexer` and the tokens it generates.
+
 use std::fmt;
 
+/// A stream-based lexical analyzer capable of interpreting string sources.
+/// 
+/// `Lexer` sequentially reads the underlying string slice and produces
+/// tokens on demand via the [`next()`](Self::next) and [`peek()`](Self::peek) methods.
 pub struct Lexer<'src> {
     source: &'src str,
     data: Vec<char>,
@@ -10,6 +18,7 @@ pub struct Lexer<'src> {
 }
 
 impl<'src> Lexer<'src> {
+    /// Creates a new `Lexer` given a source string slice.
     pub fn new(source: &'src str) -> Self {
         Self {
             source,
@@ -21,6 +30,8 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// Returns the next token in the stream, consuming it in the process.
+    /// If an EOF is reached, it will continue to return `EOF` tokens.
     pub fn next(&mut self) -> Token {
         if let Some(peek) = self.peeked.take() {
             peek
@@ -29,6 +40,8 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// Returns a reference to the next token without consuming it.
+    /// Subsequent calls to `peek()` or `next()` will return this same token.
     pub fn peek(&mut self) -> &Token {
         if self.peeked.is_none() {
             self.peeked = Some(self.next_token());
@@ -526,6 +539,7 @@ impl<'src> Lexer<'src> {
     }
 }
 
+/// Represents a single analyzed token with its kind, source location, and original string segment.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Token {
     pub kind: TokenKind,
@@ -563,11 +577,13 @@ impl fmt::Display for Token {
 }
 
 impl Token {
+    /// Returns a string slice of the original text this token represents.
     pub fn source(&self) -> &str {
         // unsafe { transmute::<&'static str, &str>(self.source) }
         &self.source
     }
 
+    /// Creates a new `Token` from a given kind, location, and source string.
     pub fn new(kind: TokenKind, loc: Loc, source: String) -> Self {
         Self {
             kind,
@@ -577,10 +593,12 @@ impl Token {
         }
     }
 
+    /// Returns whether this token represents the End of File (`EOF`).
     pub fn is_eof(&self) -> bool {
         matches!(self.kind, TokenKind::EOF)
     }
 
+    /// Attempts to unescape this token as a string literal.
     pub fn unescape(&self) -> String {
         match self.kind {
             TokenKind::StringLiteral => token_string_unescape(self.source()),
@@ -618,6 +636,7 @@ pub fn token_string_unescape(source: &str) -> String {
     buffer
 }
 
+/// The specific type or category of a parsed token.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenKind {
     #[default]
@@ -687,6 +706,7 @@ pub enum TokenKind {
     Int(NumberBase),
 }
 
+/// The numerical base of a parsed number token (e.g., Binary, Octal, Decimal, Hexadecimal).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NumberBase {
     B,
@@ -750,6 +770,7 @@ impl TokenKind {
     }
 }
 
+/// Captures physical location in the parsed source, specifically the line and column number.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Loc {
     pub line: usize,
