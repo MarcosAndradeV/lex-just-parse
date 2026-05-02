@@ -2,5 +2,8 @@
 name = "lex-just-parse"
 version = "0.1.1"
 edition = "2024"
+authors = [ "Marcos V. Andrade Almeida" ]
+description = "lex-just-parse is a simple and easy-to-use lexing and parsing crate for Rust. It provides a fast, stream-based lexical analyzer (Lexer) and combinator-style parser utilities (Parser) to assist in developing custom programming languages, DSLs, or handling structured text parsing needs."
+repository = "https://github.com/MarcosAndradeV/lex-just-parse/"
 
 [dependencies]
