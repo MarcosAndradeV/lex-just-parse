@@ -1,11 +1,11 @@
 //! Provides lexical analysis features.
-//! 
+//!
 //! This module contains the `Lexer` and the tokens it generates.
 
 use std::fmt;
 
 /// A stream-based lexical analyzer capable of interpreting string sources.
-/// 
+///
 /// `Lexer` sequentially reads the underlying string slice and produces
 /// tokens on demand via the [`next()`](Self::next) and [`peek()`](Self::peek) methods.
 pub struct Lexer<'src> {
@@ -414,7 +414,7 @@ impl<'src> Lexer<'src> {
             }
         }
         let ident = &self.source[begin_byte..self.byte_pos];
-        
+
         if self.keywords.contains(&ident) {
             kind = TokenKind::Keyword;
         }
@@ -424,11 +424,10 @@ impl<'src> Lexer<'src> {
 
     fn lex_number(&mut self, begin_byte: usize) -> Token {
         let loc = self.loc;
-        let end; // = begin_byte;
+        let end;
         let mut base = 10;
 
         // Check for base prefix (0x, 0b, 0o)
-        // if self.read_char() == '0' {
         let next = self.read_char();
         match next {
             'x' | 'X' => {
@@ -448,7 +447,6 @@ impl<'src> Lexer<'src> {
             }
             _ => {}
         }
-        // }
 
         // Read digits according to base
         loop {
@@ -456,6 +454,19 @@ impl<'src> Lexer<'src> {
             let valid = match base {
                 2 => matches!(c, '0' | '1'),
                 8 => matches!(c, '0'..='7'),
+                10 if c == '.' => {
+                    self.advance();
+                    loop {
+                        let c = self.read_char();
+                        if !c.is_ascii_digit() {
+                            break;
+                        }
+                        self.advance();
+                    }
+                    end = self.byte_pos;
+                    let num_str = &self.source[begin_byte..end];
+                    return Token::new(TokenKind::RealNumber, loc, (*num_str).into());
+                }
                 10 => c.is_ascii_digit(),
                 16 => c.is_ascii_hexdigit(),
                 _ => false,
@@ -468,18 +479,6 @@ impl<'src> Lexer<'src> {
 
         end = self.byte_pos;
 
-        // Parse suffix (letters/numbers after digits)
-        let mut suffix = String::new();
-        loop {
-            let c = self.read_char();
-            if c.is_ascii_alphanumeric() {
-                suffix.push(c);
-                self.advance();
-            } else {
-                break;
-            }
-        }
-
         let num_str = &self.source[begin_byte..end]
             .trim_start_matches("0x")
             .trim_start_matches("0X")
@@ -487,13 +486,7 @@ impl<'src> Lexer<'src> {
             .trim_start_matches("0B")
             .trim_start_matches("0o")
             .trim_start_matches("0O");
-        let kind = match (base, suffix.as_str()) {
-            (2 | 8 | 10 | 16, "" | "i32") => TokenKind::Int(NumberBase::from(base)),
-            (2 | 8 | 10 | 16, "i64") => TokenKind::Int64(NumberBase::from(base)),
-            (2 | 8 | 10 | 16, "u32") => TokenKind::UInt(NumberBase::from(base)),
-            (2 | 8 | 10 | 16, "u64") => TokenKind::UInt64(NumberBase::from(base)),
-            _ => TokenKind::InvalidNumber,
-        };
+        let kind = TokenKind::Number(NumberBase::from(base));
 
         Token::new(kind, loc, (*num_str).into())
     }
@@ -707,10 +700,7 @@ pub enum TokenKind {
     Dollar,
     InvalidNumber,
 
-    Int64(NumberBase),
-    UInt(NumberBase),
-    UInt64(NumberBase),
-    Int(NumberBase),
+    Number(NumberBase),
 }
 
 /// The numerical base of a parsed number token (e.g., Binary, Octal, Decimal, Hexadecimal).
@@ -756,13 +746,6 @@ impl From<NumberBase> for u32 {
 }
 
 impl TokenKind {
-    pub fn is_int_num(&self) -> bool {
-        matches!(
-            self,
-            Self::Int(_) | Self::Int64(_) | Self::UInt(_) | Self::UInt64(_)
-        )
-    }
-
     pub fn is_assign_kind(&self) -> bool {
         matches!(
             self,
