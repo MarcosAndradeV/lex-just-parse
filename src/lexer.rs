@@ -804,3 +804,288 @@ impl Loc {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lexer_init_and_eof() {
+        let mut lexer = Lexer::new("");
+        let tok = lexer.next();
+        assert_eq!(tok.kind, TokenKind::EOF);
+        assert!(tok.is_eof());
+        
+        let tok2 = lexer.next();
+        assert_eq!(tok2.kind, TokenKind::EOF);
+    }
+
+    #[test]
+    fn test_lexer_peek() {
+        let mut lexer = Lexer::new("abc");
+        let peeked = lexer.peek().clone();
+        assert_eq!(peeked.kind, TokenKind::Identifier);
+        assert_eq!(peeked.source(), "abc");
+        let next = lexer.next();
+        assert_eq!(next, peeked);
+        assert_eq!(lexer.next().kind, TokenKind::EOF);
+    }
+
+    #[test]
+    fn test_comment_skipping() {
+        let source = "   // this is a line comment\n  identifier";
+        let mut lexer = Lexer::new(source);
+        let tok = lexer.next();
+        assert_eq!(tok.kind, TokenKind::Identifier);
+        assert_eq!(tok.source(), "identifier");
+        assert_eq!(tok.loc.line, 2);
+        assert_eq!(lexer.next().kind, TokenKind::EOF);
+    }
+
+    #[test]
+    fn test_shebang_skipping() {
+        let source = "#!/usr/bin/env rust\nidentifier";
+        let mut lexer = Lexer::new(source);
+        let tok = lexer.next();
+        assert_eq!(tok.kind, TokenKind::Identifier);
+        assert_eq!(tok.source(), "identifier");
+        assert_eq!(tok.loc.line, 2);
+    }
+
+    #[test]
+    fn test_keywords() {
+        let source = "var let my_ident";
+        let mut lexer = Lexer::new(source).with_keywords(&["var", "let"]);
+        let t1 = lexer.next();
+        assert_eq!(t1.kind, TokenKind::Keyword);
+        assert_eq!(t1.source(), "var");
+        let t2 = lexer.next();
+        assert_eq!(t2.kind, TokenKind::Keyword);
+        assert_eq!(t2.source(), "let");
+        let t3 = lexer.next();
+        assert_eq!(t3.kind, TokenKind::Identifier);
+        assert_eq!(t3.source(), "my_ident");
+    }
+
+    #[test]
+    fn test_identifiers() {
+        let source = "a _a a123 _123_abc";
+        let mut lexer = Lexer::new(source);
+        let idents = ["a", "_a", "a123", "_123_abc"];
+        for expected in idents {
+            let tok = lexer.next();
+            assert_eq!(tok.kind, TokenKind::Identifier);
+            assert_eq!(tok.source(), expected);
+        }
+    }
+
+    #[test]
+    fn test_location_tracking() {
+        let source = "a\n\tb";
+        let mut lexer = Lexer::new(source);
+        let t1 = lexer.next();
+        assert_eq!(t1.source(), "a");
+        assert_eq!(t1.loc, Loc::new(1, 2));
+        let t2 = lexer.next();
+        assert_eq!(t2.source(), "b");
+        // After 'a', we have '\n'. line becomes 2, col becomes 1.
+        // Then we have '\t'. col is calculated as:
+        // self.col = (self.col / ts) * ts + ts;
+        // ts = 8. (1 / 8)*8 + 8 = 8.
+        // And when 'b' is read, self.loc.next('b') advances the col to 9.
+        assert_eq!(t2.loc, Loc::new(2, 9));
+    }
+
+    #[test]
+    fn test_multi_char_operators() {
+        let source = "-> == := <= >= != && || :: ...";
+        let mut lex = Lexer::new(source);
+        assert_eq!(lex.next().kind, TokenKind::Arrow);
+        assert_eq!(lex.next().kind, TokenKind::EqEq);
+        assert_eq!(lex.next().kind, TokenKind::Assign);
+        assert_eq!(lex.next().kind, TokenKind::LtEq);
+        assert_eq!(lex.next().kind, TokenKind::GtEq);
+        assert_eq!(lex.next().kind, TokenKind::NotEq);
+        assert_eq!(lex.next().kind, TokenKind::DoubleAmpersand);
+        assert_eq!(lex.next().kind, TokenKind::DoublePipe);
+        assert_eq!(lex.next().kind, TokenKind::DoubleColon);
+        assert_eq!(lex.next().kind, TokenKind::Ellipsis);
+    }
+
+    #[test]
+    fn test_single_and_compound_operators() {
+        let source = ", ; : \\ = < > ! + ++ += - -= . * *= / /= % %= $ & ^ | ( ) [ ] { }";
+        let mut lex = Lexer::new(source);
+        assert_eq!(lex.next().kind, TokenKind::Comma);
+        assert_eq!(lex.next().kind, TokenKind::SemiColon);
+        assert_eq!(lex.next().kind, TokenKind::Colon);
+        assert_eq!(lex.next().kind, TokenKind::BackSlash);
+        assert_eq!(lex.next().kind, TokenKind::Eq);
+        assert_eq!(lex.next().kind, TokenKind::Lt);
+        assert_eq!(lex.next().kind, TokenKind::Gt);
+        assert_eq!(lex.next().kind, TokenKind::Bang);
+        assert_eq!(lex.next().kind, TokenKind::Plus);
+        assert_eq!(lex.next().kind, TokenKind::Concat); // ++
+        assert_eq!(lex.next().kind, TokenKind::PlusEq); // +=
+        assert_eq!(lex.next().kind, TokenKind::Minus);
+        assert_eq!(lex.next().kind, TokenKind::MinusEq); // -=
+        assert_eq!(lex.next().kind, TokenKind::Dot);
+        assert_eq!(lex.next().kind, TokenKind::Asterisk);
+        assert_eq!(lex.next().kind, TokenKind::AsteriskEq); // *=
+        assert_eq!(lex.next().kind, TokenKind::Slash);
+        assert_eq!(lex.next().kind, TokenKind::SlashEq); // /=
+        assert_eq!(lex.next().kind, TokenKind::Mod);
+        assert_eq!(lex.next().kind, TokenKind::ModEq); // %=
+        assert_eq!(lex.next().kind, TokenKind::Dollar);
+        assert_eq!(lex.next().kind, TokenKind::Ampersand);
+        assert_eq!(lex.next().kind, TokenKind::Caret);
+        assert_eq!(lex.next().kind, TokenKind::Pipe);
+        assert_eq!(lex.next().kind, TokenKind::OpenParen);
+        assert_eq!(lex.next().kind, TokenKind::CloseParen);
+        assert_eq!(lex.next().kind, TokenKind::OpenBracket);
+        assert_eq!(lex.next().kind, TokenKind::CloseBracket);
+        assert_eq!(lex.next().kind, TokenKind::OpenCurly);
+        assert_eq!(lex.next().kind, TokenKind::CloseCurly);
+    }
+
+    #[test]
+    fn test_directives() {
+        let mut lex = Lexer::new("#define ABC");
+        let tok = lex.next();
+        assert_eq!(tok.kind, TokenKind::Directive);
+        assert_eq!(tok.source(), "#define");
+        
+        let mut lex2 = Lexer::new("#!/bin/bash\n#include");
+        let tok2 = lex2.next();
+        assert_eq!(tok2.kind, TokenKind::Directive);
+        assert_eq!(tok2.source(), "#include");
+        
+        let mut lex3 = Lexer::new(" #!");
+        let tok3 = lex3.next();
+        assert_eq!(tok3.kind, TokenKind::Directive);
+        assert_eq!(tok3.source(), "#");
+    }
+
+    #[test]
+    fn test_numeric_bases() {
+        let source = "123 0b101 0o755 0xFF 1.23";
+        let mut lex = Lexer::new(source);
+        
+        let t1 = lex.next();
+        assert_eq!(t1.kind, TokenKind::Number(NumberBase::D));
+        assert_eq!(t1.source(), "123");
+        
+        let t2 = lex.next();
+        assert_eq!(t2.kind, TokenKind::Number(NumberBase::B));
+        assert_eq!(t2.source(), "101");
+        
+        let t3 = lex.next();
+        assert_eq!(t3.kind, TokenKind::Number(NumberBase::O));
+        assert_eq!(t3.source(), "755");
+        
+        let t4 = lex.next();
+        assert_eq!(t4.kind, TokenKind::Number(NumberBase::X));
+        assert_eq!(t4.source(), "FF");
+        
+        let t5 = lex.next();
+        assert_eq!(t5.kind, TokenKind::RealNumber);
+        assert_eq!(t5.source(), "1.23");
+    }
+
+    #[test]
+    fn test_number_base_conversions() {
+        assert_eq!(NumberBase::B.radix(), 2);
+        assert_eq!(NumberBase::O.radix(), 8);
+        assert_eq!(NumberBase::D.radix(), 10);
+        assert_eq!(NumberBase::X.radix(), 16);
+        
+        assert_eq!(NumberBase::from(2), NumberBase::B);
+        assert_eq!(NumberBase::from(8), NumberBase::O);
+        assert_eq!(NumberBase::from(10), NumberBase::D);
+        assert_eq!(NumberBase::from(16), NumberBase::X);
+        
+        assert_eq!(u32::from(NumberBase::B), 2);
+        assert_eq!(u32::from(NumberBase::O), 8);
+        assert_eq!(u32::from(NumberBase::D), 10);
+        assert_eq!(u32::from(NumberBase::X), 16);
+    }
+
+    #[test]
+    #[should_panic(expected = "Unkwon base")]
+    fn test_number_base_panic() {
+        let _ = NumberBase::from(3);
+    }
+
+    #[test]
+    fn test_string_literals() {
+        let mut lex = Lexer::new("\"hello\"");
+        let t = lex.next();
+        assert_eq!(t.kind, TokenKind::StringLiteral);
+        assert_eq!(t.source(), "\"hello\"");
+        assert_eq!(t.unescape(), "hello");
+        
+        let mut lex = Lexer::new("\"hello\\nworld\"");
+        let t = lex.next();
+        assert_eq!(t.kind, TokenKind::StringLiteral);
+        assert_eq!(t.unescape(), "hello\nworld");
+        
+        let mut lex = Lexer::new("\"hello\\x\"");
+        let t = lex.next();
+        assert_eq!(t.kind, TokenKind::InvalidEscapeSequence);
+        assert_eq!(t.source(), "\"hello\\");
+        
+        let mut lex = Lexer::new("\"hello");
+        let t = lex.next();
+        assert_eq!(t.kind, TokenKind::UnterminatedStringLiteral);
+        assert_eq!(t.source(), "\"hello");
+    }
+
+    #[test]
+    fn test_token_helpers_and_display() {
+        let loc = Loc::new(5, 10);
+        let token = Token::new(TokenKind::Identifier, loc, "foo".to_string());
+        assert!(!token.is_eof());
+        assert_eq!(format!("{}", loc), "5:10");
+        assert_eq!(format!("{}", token), "foo");
+        
+        let eof_token = Token::new(TokenKind::EOF, loc, "".to_string());
+        assert!(eof_token.is_eof());
+        assert_eq!(format!("{}", eof_token), "EOF");
+        
+        let err_token = Token::new(TokenKind::UnexpectedCharacter, loc, "@".to_string());
+        assert_eq!(format!("{}", err_token), "Unexpected Character `@`");
+        
+        let esc_err = Token::new(TokenKind::InvalidEscapeSequence, loc, "\\x".to_string());
+        assert_eq!(format!("{}", esc_err), "Invalid Escape Sequence `\\\\x`");
+        
+        let unterminated = Token::new(TokenKind::UnterminatedStringLiteral, loc, "\"abc".to_string());
+        assert_eq!(format!("{}", unterminated), "Unterminated String Literal `\\\"abc`");
+        
+        let str_tok = Token::new(TokenKind::StringLiteral, loc, "\"abc\"".to_string());
+        assert_eq!(format!("{}", str_tok), "\\\"abc\\\"");
+
+        let char_tok = Token::new(TokenKind::CharacterLiteral, loc, "'a'".to_string());
+        assert_eq!(format!("{}", char_tok), "\\'a\\'");
+    }
+
+    #[test]
+    fn test_is_assign_kind() {
+        assert!(TokenKind::Assign.is_assign_kind());
+        assert!(TokenKind::Eq.is_assign_kind());
+        assert!(TokenKind::PlusEq.is_assign_kind());
+        assert!(TokenKind::MinusEq.is_assign_kind());
+        assert!(TokenKind::AsteriskEq.is_assign_kind());
+        assert!(TokenKind::SlashEq.is_assign_kind());
+        assert!(TokenKind::ModEq.is_assign_kind());
+        assert!(!TokenKind::Plus.is_assign_kind());
+        assert!(!TokenKind::Identifier.is_assign_kind());
+    }
+
+    #[test]
+    fn test_unexpected_character() {
+        let mut lex = Lexer::new("@");
+        let t = lex.next();
+        assert_eq!(t.kind, TokenKind::UnexpectedCharacter);
+        assert_eq!(t.source(), "@");
+    }
+}
