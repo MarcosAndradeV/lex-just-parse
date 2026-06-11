@@ -138,17 +138,15 @@ where
             let mut current_lex = lex;
             loop {
                 match separator(current_lex) {
-                    Parser::Success(sep_lex, _) => {
-                        match parser(sep_lex) {
-                            Parser::Success(next_lex, val) => {
-                                results.push(val);
-                                current_lex = next_lex;
-                            }
-                            Parser::Fail(fail_lex, _) => {
-                                return Parser::Success(fail_lex, results);
-                            }
+                    Parser::Success(sep_lex, _) => match parser(sep_lex) {
+                        Parser::Success(next_lex, val) => {
+                            results.push(val);
+                            current_lex = next_lex;
                         }
-                    }
+                        Parser::Fail(fail_lex, _) => {
+                            return Parser::Success(fail_lex, results);
+                        }
+                    },
                     Parser::Fail(next_lex, _) => {
                         return Parser::Success(next_lex, results);
                     }
@@ -298,7 +296,9 @@ mod tests {
 
     #[test]
     fn test_try_parse_macro_in_place() {
-        fn parse_pair_in_place<'lex>(mut lex: RefLexer<'lex>) -> Parser<'lex, (String, String), String> {
+        fn parse_pair_in_place<'lex>(
+            mut lex: RefLexer<'lex>,
+        ) -> Parser<'lex, (String, String), String> {
             let first = try_parse!(lex, parse_ident(lex, "abc"));
             let second = try_parse!(lex, parse_ident(lex, "xyz"));
             Parser::Success(lex, (first, second))
@@ -333,7 +333,7 @@ mod tests {
             }
             _ => panic!("Expected Success for many"),
         }
-        
+
         let mut lexer2 = Lexer::new("xyz");
         let result2 = many(&mut lexer2, |l| parse_ident(l, "abc"));
         match result2 {
