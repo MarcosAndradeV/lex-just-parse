@@ -9,3 +9,6 @@ repository = "https://github.com/MarcosAndradeV/lex-just-parse/"
 license-file = "LICENSE"
 
 [dependencies]
+
+[features]
+interning = []

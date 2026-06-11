@@ -69,12 +69,11 @@ mod tests {
     use super::*;
     use crate::lexer::{Lexer, TokenKind};
 
-    // A helper parser function that expects a specific identifier
     fn parse_ident<'lex>(lex: RefLexer<'lex>, expected: &str) -> Parser<'lex, String, String> {
         let tok = lex.peek().clone();
         if tok.kind == TokenKind::Identifier && tok.source() == expected {
             lex.next(); // consume
-            Parser::Success(lex, tok.source)
+            Parser::Success(lex, tok.source.to_string())
         } else {
             Parser::Fail(lex, format!("Expected identifier '{}', got {:?}", expected, tok.kind))
         }

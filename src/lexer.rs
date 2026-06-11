@@ -540,13 +540,104 @@ impl<'src> Lexer<'src> {
     }
 }
 
+/// A type representing a token's source string, which can be either an owned `String`
+/// or a leaked `&'static str` when the `interning` feature is enabled.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TokenSource(
+    #[cfg(feature = "interning")] pub &'static str,
+    #[cfg(not(feature = "interning"))] pub String,
+);
+
+impl std::ops::Deref for TokenSource {
+    type Target = str;
+
+    #[inline]
+    fn deref(&self) -> &str {
+        #[cfg(feature = "interning")]
+        {
+            self.0
+        }
+        #[cfg(not(feature = "interning"))]
+        {
+            &self.0
+        }
+    }
+}
+
+impl fmt::Display for TokenSource {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&**self, f)
+    }
+}
+
+impl From<&str> for TokenSource {
+    #[inline]
+    fn from(s: &str) -> Self {
+        #[cfg(feature = "interning")]
+        {
+            Self(intern(s))
+        }
+        #[cfg(not(feature = "interning"))]
+        {
+            Self(s.to_string())
+        }
+    }
+}
+
+impl From<String> for TokenSource {
+    #[inline]
+    fn from(s: String) -> Self {
+        #[cfg(feature = "interning")]
+        {
+            Self(intern(&s))
+        }
+        #[cfg(not(feature = "interning"))]
+        {
+            Self(s)
+        }
+    }
+}
+
+impl From<&String> for TokenSource {
+    #[inline]
+    fn from(s: &String) -> Self {
+        #[cfg(feature = "interning")]
+        {
+            Self(intern(s.as_str()))
+        }
+        #[cfg(not(feature = "interning"))]
+        {
+            Self(s.clone())
+        }
+    }
+}
+
+#[cfg(feature = "interning")]
+static INTERNER: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> = std::sync::OnceLock::new();
+
+#[cfg(feature = "interning")]
+fn intern(s: &str) -> &'static str {
+    let mut interner = INTERNER
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+        .lock()
+        .unwrap();
+    if let Some(interned) = interner.get(s) {
+        interned
+    } else {
+        let leaked: &'static str = Box::leak(s.to_string().into_boxed_str());
+        interner.insert(leaked);
+        leaked
+    }
+}
+
 /// Represents a single analyzed token with its kind, source location, and original string segment.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Token {
     pub kind: TokenKind,
     pub loc: Loc,
     // source: &'static str,
-    pub source: String,
+    pub source: TokenSource,
 }
 
 impl fmt::Display for Token {
@@ -585,7 +676,7 @@ impl Token {
     }
 
     /// Creates a new `Token` from a given kind, location, and source string.
-    pub fn new(kind: TokenKind, loc: Loc, source: String) -> Self {
+    pub fn new(kind: TokenKind, loc: Loc, source: TokenSource) -> Self {
         Self {
             kind,
             loc,
@@ -1043,28 +1134,28 @@ mod tests {
     #[test]
     fn test_token_helpers_and_display() {
         let loc = Loc::new(5, 10);
-        let token = Token::new(TokenKind::Identifier, loc, "foo".to_string());
+        let token = Token::new(TokenKind::Identifier, loc, "foo".into());
         assert!(!token.is_eof());
         assert_eq!(format!("{}", loc), "5:10");
         assert_eq!(format!("{}", token), "foo");
         
-        let eof_token = Token::new(TokenKind::EOF, loc, "".to_string());
+        let eof_token = Token::new(TokenKind::EOF, loc, "".into());
         assert!(eof_token.is_eof());
         assert_eq!(format!("{}", eof_token), "EOF");
         
-        let err_token = Token::new(TokenKind::UnexpectedCharacter, loc, "@".to_string());
+        let err_token = Token::new(TokenKind::UnexpectedCharacter, loc, "@".into());
         assert_eq!(format!("{}", err_token), "Unexpected Character `@`");
         
-        let esc_err = Token::new(TokenKind::InvalidEscapeSequence, loc, "\\x".to_string());
+        let esc_err = Token::new(TokenKind::InvalidEscapeSequence, loc, "\\x".into());
         assert_eq!(format!("{}", esc_err), "Invalid Escape Sequence `\\\\x`");
         
-        let unterminated = Token::new(TokenKind::UnterminatedStringLiteral, loc, "\"abc".to_string());
+        let unterminated = Token::new(TokenKind::UnterminatedStringLiteral, loc, "\"abc".into());
         assert_eq!(format!("{}", unterminated), "Unterminated String Literal `\\\"abc`");
         
-        let str_tok = Token::new(TokenKind::StringLiteral, loc, "\"abc\"".to_string());
+        let str_tok = Token::new(TokenKind::StringLiteral, loc, "\"abc\"".into());
         assert_eq!(format!("{}", str_tok), "\\\"abc\\\"");
 
-        let char_tok = Token::new(TokenKind::CharacterLiteral, loc, "'a'".to_string());
+        let char_tok = Token::new(TokenKind::CharacterLiteral, loc, "'a'".into());
         assert_eq!(format!("{}", char_tok), "\\'a\\'");
     }
 
@@ -1087,5 +1178,29 @@ mod tests {
         let t = lex.next();
         assert_eq!(t.kind, TokenKind::UnexpectedCharacter);
         assert_eq!(t.source(), "@");
+    }
+
+    #[test]
+    fn test_string_interning_pointer_equality() {
+        let source = "my_var my_var";
+        let mut lex = Lexer::new(source);
+        let t1 = lex.next();
+        let t2 = lex.next();
+        assert_eq!(t1.source(), "my_var");
+        assert_eq!(t2.source(), "my_var");
+        
+        #[cfg(feature = "interning")]
+        {
+            let p1 = t1.source.0;
+            let p2 = t2.source.0;
+            assert!(std::ptr::eq(p1, p2));
+        }
+        
+        #[cfg(not(feature = "interning"))]
+        {
+            let p1 = t1.source.0.as_ptr();
+            let p2 = t2.source.0.as_ptr();
+            assert!(!std::ptr::eq(p1, p2));
+        }
     }
 }
