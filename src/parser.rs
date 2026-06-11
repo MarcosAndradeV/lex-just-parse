@@ -20,6 +20,18 @@ macro_rules! try_parse {
             Parser::Fail(lexer, e) => return Parser::Fail(lexer, e),
         }
     };
+    ($lex:ident, $f:expr) => {
+        match $f {
+            Parser::Success(lexer, expr) => {
+                $lex = lexer;
+                expr
+            }
+            Parser::Fail(lexer, e) => {
+                $lex = lexer;
+                return Parser::Fail($lex, e);
+            }
+        }
+    };
 }
 
 /// Represents the result of a parsing operation.
@@ -61,6 +73,89 @@ impl<'lex, T, E> Parser<'lex, T, E> {
             Parser::Success(_, e) => Ok(e),
             Parser::Fail(lex, e) => Err((lex, e)),
         }
+    }
+}
+
+/// Parses zero or more occurrences of `parser` until it fails.
+/// Returns the collected items and the updated lexer.
+pub fn many<'lex, T, E, F>(mut lex: RefLexer<'lex>, parser: F) -> Parser<'lex, Vec<T>, E>
+where
+    F: Fn(RefLexer<'lex>) -> Parser<'lex, T, E>,
+{
+    let mut results = Vec::new();
+    loop {
+        match parser(lex) {
+            Parser::Success(next_lex, val) => {
+                results.push(val);
+                lex = next_lex;
+            }
+            Parser::Fail(next_lex, _) => {
+                return Parser::Success(next_lex, results);
+            }
+        }
+    }
+}
+
+/// Parses one or more occurrences of `parser`.
+/// Returns Fail if the first attempt fails.
+pub fn many1<'lex, T, E, F>(lex: RefLexer<'lex>, parser: F) -> Parser<'lex, Vec<T>, E>
+where
+    F: Fn(RefLexer<'lex>) -> Parser<'lex, T, E>,
+{
+    match parser(lex) {
+        Parser::Success(lex, first_val) => {
+            let mut results = vec![first_val];
+            let mut current_lex = lex;
+            loop {
+                match parser(current_lex) {
+                    Parser::Success(next_lex, val) => {
+                        results.push(val);
+                        current_lex = next_lex;
+                    }
+                    Parser::Fail(next_lex, _) => {
+                        return Parser::Success(next_lex, results);
+                    }
+                }
+            }
+        }
+        Parser::Fail(lex, err) => Parser::Fail(lex, err),
+    }
+}
+
+/// Parses zero or more occurrences of `parser` separated by `separator`.
+pub fn sep_by<'lex, T, S, E, F, G>(
+    lex: RefLexer<'lex>,
+    parser: F,
+    separator: G,
+) -> Parser<'lex, Vec<T>, E>
+where
+    F: Fn(RefLexer<'lex>) -> Parser<'lex, T, E>,
+    G: Fn(RefLexer<'lex>) -> Parser<'lex, S, E>,
+{
+    match parser(lex) {
+        Parser::Success(lex, first_val) => {
+            let mut results = vec![first_val];
+            let mut current_lex = lex;
+            loop {
+                match separator(current_lex) {
+                    Parser::Success(sep_lex, _) => {
+                        match parser(sep_lex) {
+                            Parser::Success(next_lex, val) => {
+                                results.push(val);
+                                current_lex = next_lex;
+                            }
+                            Parser::Fail(fail_lex, _) => {
+                                return Parser::Success(fail_lex, results);
+                            }
+                        }
+                    }
+                    Parser::Fail(next_lex, _) => {
+                        return Parser::Success(next_lex, results);
+                    }
+                }
+            }
+        }
+        Parser::Fail(lex, _) => Parser::Success(lex, Vec::new()),
     }
 }
 
@@ -198,6 +293,111 @@ mod tests {
         match res2 {
             Parser::Fail(_, err) => assert!(err.contains("Expected identifier 'xyz'")),
             _ => panic!("Expected Fail using try_parse!"),
+        }
+    }
+
+    #[test]
+    fn test_try_parse_macro_in_place() {
+        fn parse_pair_in_place<'lex>(mut lex: RefLexer<'lex>) -> Parser<'lex, (String, String), String> {
+            let first = try_parse!(lex, parse_ident(lex, "abc"));
+            let second = try_parse!(lex, parse_ident(lex, "xyz"));
+            Parser::Success(lex, (first, second))
+        }
+
+        let mut lexer = Lexer::new("abc xyz");
+        let res = parse_pair_in_place(&mut lexer);
+        match res {
+            Parser::Success(_, (v1, v2)) => {
+                assert_eq!(v1, "abc");
+                assert_eq!(v2, "xyz");
+            }
+            _ => panic!("Expected success using try_parse! in-place"),
+        }
+
+        let mut lexer2 = Lexer::new("abc err");
+        let res2 = parse_pair_in_place(&mut lexer2);
+        match res2 {
+            Parser::Fail(_, err) => assert!(err.contains("Expected identifier 'xyz'")),
+            _ => panic!("Expected Fail using try_parse! in-place"),
+        }
+    }
+
+    #[test]
+    fn test_combinator_many() {
+        let mut lexer = Lexer::new("abc abc abc xyz");
+        let result = many(&mut lexer, |l| parse_ident(l, "abc"));
+        match result {
+            Parser::Success(remaining_lexer, items) => {
+                assert_eq!(items, vec!["abc", "abc", "abc"]);
+                assert_eq!(remaining_lexer.next().source(), "xyz");
+            }
+            _ => panic!("Expected Success for many"),
+        }
+        
+        let mut lexer2 = Lexer::new("xyz");
+        let result2 = many(&mut lexer2, |l| parse_ident(l, "abc"));
+        match result2 {
+            Parser::Success(remaining_lexer, items) => {
+                assert!(items.is_empty());
+                assert_eq!(remaining_lexer.next().source(), "xyz");
+            }
+            _ => panic!("Expected Success for many with empty results"),
+        }
+    }
+
+    #[test]
+    fn test_combinator_many1() {
+        let mut lexer = Lexer::new("abc abc xyz");
+        let result = many1(&mut lexer, |l| parse_ident(l, "abc"));
+        match result {
+            Parser::Success(remaining_lexer, items) => {
+                assert_eq!(items, vec!["abc", "abc"]);
+                assert_eq!(remaining_lexer.next().source(), "xyz");
+            }
+            _ => panic!("Expected Success for many1"),
+        }
+
+        let mut lexer2 = Lexer::new("xyz");
+        let result2 = many1(&mut lexer2, |l| parse_ident(l, "abc"));
+        match result2 {
+            Parser::Fail(remaining_lexer, err) => {
+                assert!(err.contains("Expected identifier 'abc'"));
+                assert_eq!(remaining_lexer.next().source(), "xyz");
+            }
+            _ => panic!("Expected Fail for many1 on immediately failing parser"),
+        }
+    }
+
+    #[test]
+    fn test_combinator_sep_by() {
+        fn parse_comma<'lex>(lex: RefLexer<'lex>) -> Parser<'lex, (), String> {
+            let tok = lex.peek().clone();
+            if tok.kind == TokenKind::Comma {
+                lex.next();
+                Parser::Success(lex, ())
+            } else {
+                Parser::Fail(lex, "Expected comma".to_string())
+            }
+        }
+
+        let mut lexer = Lexer::new("abc , abc , abc ;");
+        let result = sep_by(&mut lexer, |l| parse_ident(l, "abc"), parse_comma);
+        match result {
+            Parser::Success(remaining_lexer, items) => {
+                assert_eq!(items, vec!["abc", "abc", "abc"]);
+                assert_eq!(remaining_lexer.next().kind, TokenKind::SemiColon);
+            }
+            _ => panic!("Expected Success for sep_by"),
+        }
+
+        let mut lexer2 = Lexer::new("xyz");
+        let result2 = sep_by(&mut lexer2, |l| parse_ident(l, "abc"), parse_comma);
+        match result2 {
+            Parser::Success(remaining_lexer, items) => {
+                assert!(items.is_empty());
+                assert_eq!(remaining_lexer.next().source(), "xyz");
+            }
+            _ => panic!("Expected Success for sep_by on empty sequence"),
         }
     }
 }
