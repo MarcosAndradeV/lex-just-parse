@@ -1,6 +1,6 @@
 //! Combinator parsing utilities.
 //!
-//! Provides the core `Parser` type and related type definitions 
+//! Provides the core `Parser` type and related type definitions
 //! for building lexer-driven parsers.
 
 use crate::lexer::Lexer;
@@ -75,7 +75,10 @@ mod tests {
             lex.next(); // consume
             Parser::Success(lex, tok.source.to_string())
         } else {
-            Parser::Fail(lex, format!("Expected identifier '{}', got {:?}", expected, tok.kind))
+            Parser::Fail(
+                lex,
+                format!("Expected identifier '{}', got {:?}", expected, tok.kind),
+            )
         }
     }
 
@@ -114,9 +117,8 @@ mod tests {
     fn test_parser_or_else() {
         // Test standard or_else functionality where first parser fails and second succeeds
         let mut lexer = Lexer::new("xyz");
-        let result = parse_ident(&mut lexer, "abc")
-            .or_else(|lex| parse_ident(lex, "xyz"));
-        
+        let result = parse_ident(&mut lexer, "abc").or_else(|lex| parse_ident(lex, "xyz"));
+
         match result {
             Parser::Success(_, val) => assert_eq!(val, "xyz"),
             _ => panic!("Expected success after or_else fallback"),
@@ -137,12 +139,10 @@ mod tests {
         // Test chaining with and_then
         // We want to parse "abc" then "xyz"
         let mut lexer = Lexer::new("abc xyz");
-        let result = parse_ident(&mut lexer, "abc")
-            .and_then(|lex, first_val| {
-                parse_ident(lex, "xyz").and_then(|lex, second_val| {
-                    Parser::Success(lex, (first_val, second_val))
-                })
-            });
+        let result = parse_ident(&mut lexer, "abc").and_then(|lex, first_val| {
+            parse_ident(lex, "xyz")
+                .and_then(|lex, second_val| Parser::Success(lex, (first_val, second_val)))
+        });
 
         match result {
             Parser::Success(_, (v1, v2)) => {
@@ -154,10 +154,8 @@ mod tests {
 
         // Test and_then failure propagation
         let mut lexer2 = Lexer::new("abc error");
-        let result2 = parse_ident(&mut lexer2, "abc")
-            .and_then(|lex, _first_val| {
-                parse_ident(lex, "xyz")
-            });
+        let result2 =
+            parse_ident(&mut lexer2, "abc").and_then(|lex, _first_val| parse_ident(lex, "xyz"));
         match result2 {
             Parser::Fail(_, err) => assert!(err.contains("Expected identifier 'xyz'")),
             _ => panic!("Expected Fail"),
@@ -165,10 +163,11 @@ mod tests {
 
         // Test and_then when first parser fails (second should not run)
         let mut lexer3 = Lexer::new("error xyz");
-        let result3 = parse_ident(&mut lexer3, "abc")
-            .and_then(|_lex, _first_val| -> Parser<String, String> {
+        let result3 = parse_ident(&mut lexer3, "abc").and_then(
+            |_lex, _first_val| -> Parser<String, String> {
                 panic!("Should not execute and_then function when first failed")
-            });
+            },
+        );
         match result3 {
             Parser::Fail(_, err) => assert!(err.contains("Expected identifier 'abc'")),
             _ => panic!("Expected Fail"),

@@ -614,7 +614,8 @@ impl From<&String> for TokenSource {
 }
 
 #[cfg(feature = "interning")]
-static INTERNER: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> = std::sync::OnceLock::new();
+static INTERNER: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> =
+    std::sync::OnceLock::new();
 
 #[cfg(feature = "interning")]
 fn intern(s: &str) -> &'static str {
@@ -906,7 +907,7 @@ mod tests {
         let tok = lexer.next();
         assert_eq!(tok.kind, TokenKind::EOF);
         assert!(tok.is_eof());
-        
+
         let tok2 = lexer.next();
         assert_eq!(tok2.kind, TokenKind::EOF);
     }
@@ -1045,12 +1046,12 @@ mod tests {
         let tok = lex.next();
         assert_eq!(tok.kind, TokenKind::Directive);
         assert_eq!(tok.source(), "#define");
-        
+
         let mut lex2 = Lexer::new("#!/bin/bash\n#include");
         let tok2 = lex2.next();
         assert_eq!(tok2.kind, TokenKind::Directive);
         assert_eq!(tok2.source(), "#include");
-        
+
         let mut lex3 = Lexer::new(" #!");
         let tok3 = lex3.next();
         assert_eq!(tok3.kind, TokenKind::Directive);
@@ -1061,23 +1062,23 @@ mod tests {
     fn test_numeric_bases() {
         let source = "123 0b101 0o755 0xFF 1.23";
         let mut lex = Lexer::new(source);
-        
+
         let t1 = lex.next();
         assert_eq!(t1.kind, TokenKind::Number(NumberBase::D));
         assert_eq!(t1.source(), "123");
-        
+
         let t2 = lex.next();
         assert_eq!(t2.kind, TokenKind::Number(NumberBase::B));
         assert_eq!(t2.source(), "101");
-        
+
         let t3 = lex.next();
         assert_eq!(t3.kind, TokenKind::Number(NumberBase::O));
         assert_eq!(t3.source(), "755");
-        
+
         let t4 = lex.next();
         assert_eq!(t4.kind, TokenKind::Number(NumberBase::X));
         assert_eq!(t4.source(), "FF");
-        
+
         let t5 = lex.next();
         assert_eq!(t5.kind, TokenKind::RealNumber);
         assert_eq!(t5.source(), "1.23");
@@ -1089,12 +1090,12 @@ mod tests {
         assert_eq!(NumberBase::O.radix(), 8);
         assert_eq!(NumberBase::D.radix(), 10);
         assert_eq!(NumberBase::X.radix(), 16);
-        
+
         assert_eq!(NumberBase::from(2), NumberBase::B);
         assert_eq!(NumberBase::from(8), NumberBase::O);
         assert_eq!(NumberBase::from(10), NumberBase::D);
         assert_eq!(NumberBase::from(16), NumberBase::X);
-        
+
         assert_eq!(u32::from(NumberBase::B), 2);
         assert_eq!(u32::from(NumberBase::O), 8);
         assert_eq!(u32::from(NumberBase::D), 10);
@@ -1114,17 +1115,17 @@ mod tests {
         assert_eq!(t.kind, TokenKind::StringLiteral);
         assert_eq!(t.source(), "\"hello\"");
         assert_eq!(t.unescape(), "hello");
-        
+
         let mut lex = Lexer::new("\"hello\\nworld\"");
         let t = lex.next();
         assert_eq!(t.kind, TokenKind::StringLiteral);
         assert_eq!(t.unescape(), "hello\nworld");
-        
+
         let mut lex = Lexer::new("\"hello\\x\"");
         let t = lex.next();
         assert_eq!(t.kind, TokenKind::InvalidEscapeSequence);
         assert_eq!(t.source(), "\"hello\\");
-        
+
         let mut lex = Lexer::new("\"hello");
         let t = lex.next();
         assert_eq!(t.kind, TokenKind::UnterminatedStringLiteral);
@@ -1138,20 +1139,23 @@ mod tests {
         assert!(!token.is_eof());
         assert_eq!(format!("{}", loc), "5:10");
         assert_eq!(format!("{}", token), "foo");
-        
+
         let eof_token = Token::new(TokenKind::EOF, loc, "".into());
         assert!(eof_token.is_eof());
         assert_eq!(format!("{}", eof_token), "EOF");
-        
+
         let err_token = Token::new(TokenKind::UnexpectedCharacter, loc, "@".into());
         assert_eq!(format!("{}", err_token), "Unexpected Character `@`");
-        
+
         let esc_err = Token::new(TokenKind::InvalidEscapeSequence, loc, "\\x".into());
         assert_eq!(format!("{}", esc_err), "Invalid Escape Sequence `\\\\x`");
-        
+
         let unterminated = Token::new(TokenKind::UnterminatedStringLiteral, loc, "\"abc".into());
-        assert_eq!(format!("{}", unterminated), "Unterminated String Literal `\\\"abc`");
-        
+        assert_eq!(
+            format!("{}", unterminated),
+            "Unterminated String Literal `\\\"abc`"
+        );
+
         let str_tok = Token::new(TokenKind::StringLiteral, loc, "\"abc\"".into());
         assert_eq!(format!("{}", str_tok), "\\\"abc\\\"");
 
@@ -1188,14 +1192,14 @@ mod tests {
         let t2 = lex.next();
         assert_eq!(t1.source(), "my_var");
         assert_eq!(t2.source(), "my_var");
-        
+
         #[cfg(feature = "interning")]
         {
             let p1 = t1.source.0;
             let p2 = t2.source.0;
             assert!(std::ptr::eq(p1, p2));
         }
-        
+
         #[cfg(not(feature = "interning"))]
         {
             let p1 = t1.source.0.as_ptr();
