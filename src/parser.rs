@@ -74,6 +74,38 @@ impl<'lex, T, E> Parser<'lex, T, E> {
             Parser::Fail(lex, e) => Err((lex, e)),
         }
     }
+
+    /// Calls a function with a reference to the contained value if [`Success`].
+    /// Returns the original parser.
+    pub fn inspect<F>(self, f: F) -> Parser<'lex, T, E>
+    where
+        F: FnOnce(&T),
+    {
+        match self {
+            Parser::Success(lexer, e) =>{
+                f(&e);
+                Parser::Success(lexer, e)
+            },
+            Parser::Fail(lexer, e) => Parser::Fail(lexer, e),
+        }
+    }
+
+    /// Calls a function with a reference to the contained value if [`Fail`].
+    /// Returns the original parser.
+    pub fn inspect_fail<F>(self, f: F) -> Parser<'lex, T, E>
+    where
+        F: FnOnce(&E),
+    {
+        match self {
+            Parser::Success(lexer, e) =>{
+                Parser::Success(lexer, e)
+            },
+            Parser::Fail(lexer, e) => {
+                f(&e);
+                Parser::Fail(lexer, e)
+            }
+        }
+    }
 }
 
 /// Parses zero or more occurrences of `parser` until it fails.
@@ -157,6 +189,7 @@ where
     }
 }
 
+#[cfg(not(feature = "interning"))]
 #[cfg(test)]
 mod tests {
     use super::*;

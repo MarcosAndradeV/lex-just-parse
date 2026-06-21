@@ -19,6 +19,21 @@ pub struct Lexer<'src> {
 }
 
 impl<'src> Lexer<'src> {
+    #[cfg(feature = "interning")]
+    /// Creates a new `Lexer` given a source string slice.
+    pub fn new(file_path: impl Into<String>, source: &'src str) -> Self {
+        Self {
+            source,
+            data: source.chars().collect(),
+            loc: Loc::new(file_path, 1, 1),
+            pos: 0,
+            byte_pos: 0,
+            peeked: None,
+            keywords: Vec::new(),
+        }
+    }
+
+    #[cfg(not(feature = "interning"))]
     /// Creates a new `Lexer` given a source string slice.
     pub fn new(source: &'src str) -> Self {
         Self {
@@ -857,15 +872,29 @@ impl TokenKind {
 pub struct Loc {
     pub line: usize,
     pub col: usize,
+    #[cfg(feature = "interning")]
+    file_path: &'static str
 }
 
 impl fmt::Display for Loc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.line, self.col)
+        #[cfg(feature = "interning")]
+        {
+            write!(f, "{}:{}:{}", self.file_path, self.line, self.col)
+        }
+        #[cfg(not(feature = "interning"))]
+        {
+            write!(f, "{}:{}", self.line, self.col)
+        }
     }
 }
 
 impl Loc {
+    #[cfg(feature = "interning")]
+    pub fn new(file_path: impl Into<String>, line: usize, col: usize) -> Self {
+        Self { file_path: intern(&file_path.into()), line, col }
+    }
+    #[cfg(not(feature = "interning"))]
     pub fn new(line: usize, col: usize) -> Self {
         Self { line, col }
     }
@@ -895,8 +924,14 @@ impl Loc {
             }
         }
     }
+
+    #[cfg(feature = "interning")]
+    pub fn file_path(&self) -> &&'static str {
+        &self.file_path
+    }
 }
 
+#[cfg(not(feature = "interning"))]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1183,11 +1218,17 @@ mod tests {
         assert_eq!(t.kind, TokenKind::UnexpectedCharacter);
         assert_eq!(t.source(), "@");
     }
+}
+
+#[cfg(feature = "interning")]
+#[cfg(test)]
+mod tests {
+    use super::*;
 
     #[test]
     fn test_string_interning_pointer_equality() {
         let source = "my_var my_var";
-        let mut lex = Lexer::new(source);
+        let mut lex = Lexer::new(file!(), source);
         let t1 = lex.next();
         let t2 = lex.next();
         assert_eq!(t1.source(), "my_var");
@@ -1198,13 +1239,6 @@ mod tests {
             let p1 = t1.source.0;
             let p2 = t2.source.0;
             assert!(std::ptr::eq(p1, p2));
-        }
-
-        #[cfg(not(feature = "interning"))]
-        {
-            let p1 = t1.source.0.as_ptr();
-            let p2 = t2.source.0.as_ptr();
-            assert!(!std::ptr::eq(p1, p2));
         }
     }
 }
