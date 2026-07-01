@@ -8,6 +8,7 @@ use std::fmt;
 ///
 /// `Lexer` sequentially reads the underlying string slice and produces
 /// tokens on demand via the [`next()`](Self::next) and [`peek()`](Self::peek) methods.
+#[derive(Debug, Clone)]
 pub struct Lexer<'src> {
     source: &'src str,
     data: Vec<char>,
