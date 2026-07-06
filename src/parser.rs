@@ -110,9 +110,9 @@ impl<'lex, T, E> Parser<'lex, T, E> {
 
 /// Parses zero or more occurrences of `parser` until it fails.
 /// Returns the collected items and the updated lexer.
-pub fn many<'lex, T, E, F>(mut lex: RefLexer<'lex>, parser: F) -> Parser<'lex, Vec<T>, E>
+pub fn many<'lex, T, E, F>(mut lex: RefLexer<'lex>, mut parser: F) -> Parser<'lex, Vec<T>, E>
 where
-    F: Fn(RefLexer<'lex>) -> Parser<'lex, T, E>,
+    F: FnMut(RefLexer<'lex>) -> Parser<'lex, T, E>,
 {
     let mut results = Vec::new();
     loop {
@@ -130,9 +130,9 @@ where
 
 /// Parses one or more occurrences of `parser`.
 /// Returns Fail if the first attempt fails.
-pub fn many1<'lex, T, E, F>(lex: RefLexer<'lex>, parser: F) -> Parser<'lex, Vec<T>, E>
+pub fn many1<'lex, T, E, F>(lex: RefLexer<'lex>, mut parser: F) -> Parser<'lex, Vec<T>, E>
 where
-    F: Fn(RefLexer<'lex>) -> Parser<'lex, T, E>,
+    F: FnMut(RefLexer<'lex>) -> Parser<'lex, T, E>,
 {
     match parser(lex) {
         Parser::Success(lex, first_val) => {
@@ -157,12 +157,12 @@ where
 /// Parses zero or more occurrences of `parser` separated by `separator`.
 pub fn sep_by<'lex, T, S, E, F, G>(
     lex: RefLexer<'lex>,
-    parser: F,
-    separator: G,
+    mut parser: F,
+    mut separator: G,
 ) -> Parser<'lex, Vec<T>, E>
 where
-    F: Fn(RefLexer<'lex>) -> Parser<'lex, T, E>,
-    G: Fn(RefLexer<'lex>) -> Parser<'lex, S, E>,
+    F: FnMut(RefLexer<'lex>) -> Parser<'lex, T, E>,
+    G: FnMut(RefLexer<'lex>) -> Parser<'lex, S, E>,
 {
     match parser(lex) {
         Parser::Success(lex, first_val) => {
