@@ -355,6 +355,16 @@ impl<'src> Lexer<'src> {
                     loc,
                     self.source[begin_byte..self.byte_pos].into(),
                 ),
+                '@' => Token::new(
+                    TokenKind::At,
+                    loc,
+                    self.source[begin_byte..self.byte_pos].into(),
+                ),
+                '?' => Token::new(
+                    TokenKind::Question,
+                    loc,
+                    self.source[begin_byte..self.byte_pos].into(),
+                ),
                 '&' => Token::new(
                     TokenKind::Ampersand,
                     loc,
@@ -806,6 +816,8 @@ pub enum TokenKind {
     DoublePipe,
 
     Dollar,
+    At,
+    Question,
     InvalidNumber,
 
     Number(NumberBase),
@@ -1042,7 +1054,7 @@ mod tests {
 
     #[test]
     fn test_single_and_compound_operators() {
-        let source = ", ; : \\ = < > ! + ++ += - -= . * *= / /= % %= $ & ^ | ( ) [ ] { }";
+        let source = ", ; : \\ = < > ! + ++ += - -= . * *= / /= % %= $ & ^ | ( ) [ ] { } @ ?";
         let mut lex = Lexer::new(source);
         assert_eq!(lex.next().kind, TokenKind::Comma);
         assert_eq!(lex.next().kind, TokenKind::SemiColon);
@@ -1074,6 +1086,8 @@ mod tests {
         assert_eq!(lex.next().kind, TokenKind::CloseBracket);
         assert_eq!(lex.next().kind, TokenKind::OpenCurly);
         assert_eq!(lex.next().kind, TokenKind::CloseCurly);
+        assert_eq!(lex.next().kind, TokenKind::At);
+        assert_eq!(lex.next().kind, TokenKind::Question);
     }
 
     #[test]
@@ -1214,10 +1228,10 @@ mod tests {
 
     #[test]
     fn test_unexpected_character() {
-        let mut lex = Lexer::new("@");
+        let mut lex = Lexer::new("~");
         let t = lex.next();
         assert_eq!(t.kind, TokenKind::UnexpectedCharacter);
-        assert_eq!(t.source(), "@");
+        assert_eq!(t.source(), "~");
     }
 }
 

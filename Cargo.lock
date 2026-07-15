@@ -4,4 +4,4 @@ version = 4
 
 [[package]]
 name = "lex-just-parse"
-version = "0.4.2"
+version = "1.0.0"
