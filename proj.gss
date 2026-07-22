@@ -1,0 +1,6 @@
+config = {
+    scripts = {
+        build = "cargo build",
+        test = "cargo t && cargo t --features interning"
+    }
+}

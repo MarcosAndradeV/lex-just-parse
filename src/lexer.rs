@@ -19,6 +19,12 @@ pub struct Lexer<'src> {
     keywords: Vec<&'src str>,
 }
 
+pub struct LexerSavePoint {
+    pos: usize,
+    byte_pos: usize,
+    loc: Loc,
+}
+
 impl<'src> Lexer<'src> {
     #[cfg(feature = "interning")]
     /// Creates a new `Lexer` given a source string slice.
@@ -46,6 +52,17 @@ impl<'src> Lexer<'src> {
             peeked: None,
             keywords: Vec::new(),
         }
+    }
+
+    pub fn save(&self) -> LexerSavePoint {
+        return LexerSavePoint { pos: self.pos, byte_pos: self.byte_pos, loc: self.loc };
+    }
+
+    pub fn restore(&mut self, savepoint: LexerSavePoint) {
+        let LexerSavePoint { pos, byte_pos, loc } = savepoint;
+        self.pos = pos;
+        self.byte_pos = byte_pos;
+        self.loc = loc;
     }
 
     /// Configures the lexer with a set of predefined keywords to recognize.
@@ -1232,6 +1249,24 @@ mod tests {
         let t = lex.next();
         assert_eq!(t.kind, TokenKind::UnexpectedCharacter);
         assert_eq!(t.source(), "~");
+    }
+
+    #[test]
+    fn test_savepoint() {
+        let mut lex = Lexer::new("arr[1]");
+        let t = lex.next();
+        assert_eq!(t.kind, TokenKind::Identifier);
+        assert_eq!(t.source(), "arr");
+        let savepoint = lex.save();
+        let t = lex.next();
+        if t.kind == TokenKind::OpenParen {
+            assert!(false, "test_savepoint");
+        } else {
+            lex.restore(savepoint);
+        }
+        let t = lex.next();
+        assert_eq!(t.kind, TokenKind::OpenBracket);
+        assert_eq!(t.source(), "[");
     }
 }
 
