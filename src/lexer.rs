@@ -55,7 +55,11 @@ impl<'src> Lexer<'src> {
     }
 
     pub fn save(&self) -> LexerSavePoint {
-        return LexerSavePoint { pos: self.pos, byte_pos: self.byte_pos, loc: self.loc };
+        return LexerSavePoint {
+            pos: self.pos,
+            byte_pos: self.byte_pos,
+            loc: self.loc,
+        };
     }
 
     pub fn restore(&mut self, savepoint: LexerSavePoint) {
@@ -591,6 +595,46 @@ pub struct TokenSource(
     #[cfg(not(feature = "interning"))] pub String,
 );
 
+impl TokenSource {
+    #[cfg(feature = "interning")]
+    pub fn as_str(&self) -> &'static str {
+        self.0
+    }
+
+    #[cfg(not(feature = "interning"))]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl PartialEq<&str> for TokenSource {
+    #[inline]
+    fn eq(&self, other: &&str) -> bool {
+        #[cfg(feature = "interning")]
+        {
+            self.0 == *other
+        }
+        #[cfg(not(feature = "interning"))]
+        {
+            self.0 == *other
+        }
+    }
+}
+
+impl PartialEq<String> for TokenSource {
+    #[inline]
+    fn eq(&self, other: &String) -> bool {
+        #[cfg(feature = "interning")]
+        {
+            self.0 == other
+        }
+        #[cfg(not(feature = "interning"))]
+        {
+            self.0 == *other
+        }
+    }
+}
+
 impl std::ops::Deref for TokenSource {
     type Target = str;
 
@@ -903,7 +947,7 @@ pub struct Loc {
     pub line: usize,
     pub col: usize,
     #[cfg(feature = "interning")]
-    file_path: &'static str
+    file_path: &'static str,
 }
 
 impl fmt::Display for Loc {
@@ -922,7 +966,11 @@ impl fmt::Display for Loc {
 impl Loc {
     #[cfg(feature = "interning")]
     pub fn new(file_path: impl Into<String>, line: usize, col: usize) -> Self {
-        Self { file_path: intern(&file_path.into()), line, col }
+        Self {
+            file_path: intern(&file_path.into()),
+            line,
+            col,
+        }
     }
     #[cfg(not(feature = "interning"))]
     pub fn new(line: usize, col: usize) -> Self {
@@ -1276,6 +1324,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_str_token_source_eq() {
+        assert_eq!(TokenSource::from("test1"), "test1");
+        assert_eq!(TokenSource::from("test2"), "test2".to_string());
+        assert_eq!(TokenSource::from("test3").as_str(), "test3");
+    }
+
+    #[test]
     fn test_string_interning_pointer_equality() {
         let source = "my_var my_var";
         let mut lex = Lexer::new(file!(), source);
@@ -1284,11 +1339,8 @@ mod tests {
         assert_eq!(t1.source(), "my_var");
         assert_eq!(t2.source(), "my_var");
 
-        #[cfg(feature = "interning")]
-        {
-            let p1 = t1.source.0;
-            let p2 = t2.source.0;
-            assert!(std::ptr::eq(p1, p2));
-        }
+        let p1 = t1.source.0;
+        let p2 = t2.source.0;
+        assert!(std::ptr::eq(p1, p2));
     }
 }
