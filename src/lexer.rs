@@ -607,6 +607,20 @@ impl TokenSource {
     }
 }
 
+impl PartialEq<str> for TokenSource {
+    #[inline]
+    fn eq(&self, other: &str) -> bool {
+        #[cfg(feature = "interning")]
+        {
+            self.0 == other
+        }
+        #[cfg(not(feature = "interning"))]
+        {
+            self.0 == *other
+        }
+    }
+}
+
 impl PartialEq<&str> for TokenSource {
     #[inline]
     fn eq(&self, other: &&str) -> bool {
