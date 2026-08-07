@@ -4,6 +4,9 @@
 
 use std::fmt;
 
+/// A custom rule function for lexing custom tokens.
+pub type RuleFn = for<'a, 'src> fn(&'a mut Lexer<'src>) -> Option<Token>;
+
 /// A stream-based lexical analyzer capable of interpreting string sources.
 ///
 /// `Lexer` sequentially reads the underlying string slice and produces
@@ -17,6 +20,10 @@ pub struct Lexer<'src> {
     loc: Loc,
     peeked: Option<Token>,
     keywords: Vec<&'src str>,
+    pre_rules: Vec<RuleFn>,
+    post_rules: Vec<RuleFn>,
+    in_pre_rule: bool,
+    in_post_rule: bool,
 }
 
 pub struct LexerSavePoint {
@@ -37,6 +44,10 @@ impl<'src> Lexer<'src> {
             byte_pos: 0,
             peeked: None,
             keywords: Vec::new(),
+            pre_rules: Vec::new(),
+            post_rules: Vec::new(),
+            in_pre_rule: false,
+            in_post_rule: false,
         }
     }
 
@@ -51,6 +62,10 @@ impl<'src> Lexer<'src> {
             byte_pos: 0,
             peeked: None,
             keywords: Vec::new(),
+            pre_rules: Vec::new(),
+            post_rules: Vec::new(),
+            in_pre_rule: false,
+            in_post_rule: false,
         }
     }
 
@@ -73,6 +88,28 @@ impl<'src> Lexer<'src> {
     pub fn with_keywords(mut self, keywords: &[&'src str]) -> Self {
         self.keywords = keywords.to_vec();
         self
+    }
+
+    /// Registers a custom rule to be run before standard token matching.
+    pub fn with_pre_rule(mut self, rule: RuleFn) -> Self {
+        self.pre_rules.push(rule);
+        self
+    }
+
+    /// Registers a custom rule to be run after standard token matching (as a fallback).
+    pub fn with_post_rule(mut self, rule: RuleFn) -> Self {
+        self.post_rules.push(rule);
+        self
+    }
+
+    /// Adds a custom rule to be run before standard token matching.
+    pub fn add_pre_rule(&mut self, rule: RuleFn) {
+        self.pre_rules.push(rule);
+    }
+
+    /// Adds a custom rule to be run after standard token matching (as a fallback).
+    pub fn add_post_rule(&mut self, rule: RuleFn) {
+        self.post_rules.push(rule);
     }
 
     /// Returns the next token in the stream, consuming it in the process.
@@ -113,6 +150,21 @@ impl<'src> Lexer<'src> {
 
     fn next_token(&mut self) -> Token {
         while self.pos <= self.data.len() {
+            if !self.in_pre_rule {
+                self.in_pre_rule = true;
+                let num_pre = self.pre_rules.len();
+                for i in 0..num_pre {
+                    let rule = self.pre_rules[i];
+                    let savepoint = self.save();
+                    if let Some(tok) = rule(self) {
+                        self.in_pre_rule = false;
+                        return tok;
+                    }
+                    self.restore(savepoint);
+                }
+                self.in_pre_rule = false;
+            }
+
             let begin_byte = self.byte_pos;
             let ch = self.advance();
             let loc = self.loc;
@@ -226,6 +278,7 @@ impl<'src> Lexer<'src> {
                 ch if ch.is_alphabetic() || ch == '_' => return self.lex_identifier(begin_byte),
                 '0'..='9' => return self.lex_number(begin_byte),
                 '"' => return self.lex_string(begin_byte),
+                '\'' => return self.lex_char(begin_byte),
 
                 ',' => Token::new(
                     TokenKind::Comma,
@@ -435,6 +488,20 @@ impl<'src> Lexer<'src> {
                 ch if ch.is_whitespace() => continue,
                 '\0' => return Token::new(TokenKind::EOF, self.loc, "\0".into()),
                 _ => {
+                    if !self.in_post_rule {
+                        self.in_post_rule = true;
+                        let num_post = self.post_rules.len();
+                        for i in 0..num_post {
+                            let rule = self.post_rules[i];
+                            let savepoint = self.save();
+                            if let Some(tok) = rule(self) {
+                                self.in_post_rule = false;
+                                return tok;
+                            }
+                            self.restore(savepoint);
+                        }
+                        self.in_post_rule = false;
+                    }
                     return Token::new(
                         TokenKind::UnexpectedCharacter,
                         self.loc,
@@ -584,6 +651,132 @@ impl<'src> Lexer<'src> {
             loc,
             self.source[begin_byte..self.byte_pos].into(),
         )
+    }
+
+    fn lex_char(&mut self, begin_byte: usize) -> Token {
+        let loc = self.loc;
+        let next_ch = self.read_char();
+
+        match next_ch {
+            '\'' => {
+                // Empty character literal ''
+                self.advance();
+                Token::new(
+                    TokenKind::EmptyCharacterLiteral,
+                    loc,
+                    self.source[begin_byte..self.byte_pos].into(),
+                )
+            }
+            '\0' | '\n' => {
+                // Unterminated character literal ' or '\n
+                Token::new(
+                    TokenKind::UnterminatedCharacterLiteral,
+                    loc,
+                    self.source[begin_byte..self.byte_pos].into(),
+                )
+            }
+            '\\' => {
+                self.advance(); // consume '\'
+                let esc = self.read_char();
+                match esc {
+                    'r' | 'n' | 't' | '"' | '\'' | '\\' | '0' => {
+                        self.advance();
+                    }
+                    'x' => {
+                        self.advance(); // consume 'x'
+                        let h1 = self.read_char();
+                        if h1.is_ascii_hexdigit() {
+                            self.advance();
+                            let h2 = self.read_char();
+                            if h2.is_ascii_hexdigit() {
+                                self.advance();
+                            } else {
+                                return Token::new(
+                                    TokenKind::InvalidEscapeSequence,
+                                    loc,
+                                    self.source[begin_byte..self.byte_pos].into(),
+                                );
+                            }
+                        } else {
+                            return Token::new(
+                                TokenKind::InvalidEscapeSequence,
+                                loc,
+                                self.source[begin_byte..self.byte_pos].into(),
+                            );
+                        }
+                    }
+                    'u' => {
+                        self.advance(); // consume 'u'
+                        if self.read_char() == '{' {
+                            self.advance();
+                            let mut has_digits = false;
+                            loop {
+                                let c = self.read_char();
+                                if c.is_ascii_hexdigit() {
+                                    has_digits = true;
+                                    self.advance();
+                                } else if c == '}' && has_digits {
+                                    self.advance();
+                                    break;
+                                } else {
+                                    return Token::new(
+                                        TokenKind::InvalidEscapeSequence,
+                                        loc,
+                                        self.source[begin_byte..self.byte_pos].into(),
+                                    );
+                                }
+                            }
+                        } else {
+                            return Token::new(
+                                TokenKind::InvalidEscapeSequence,
+                                loc,
+                                self.source[begin_byte..self.byte_pos].into(),
+                            );
+                        }
+                    }
+                    _ => {
+                        return Token::new(
+                            TokenKind::InvalidEscapeSequence,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        );
+                    }
+                }
+
+                if self.read_char() == '\'' {
+                    self.advance();
+                    Token::new(
+                        TokenKind::CharacterLiteral,
+                        loc,
+                        self.source[begin_byte..self.byte_pos].into(),
+                    )
+                } else {
+                    Token::new(
+                        TokenKind::UnterminatedCharacterLiteral,
+                        loc,
+                        self.source[begin_byte..self.byte_pos].into(),
+                    )
+                }
+            }
+            _ => {
+                // Single character or UTF-8 character (e.g. 'a', '🔥')
+                self.advance();
+                if self.read_char() == '\'' {
+                    self.advance();
+                    Token::new(
+                        TokenKind::CharacterLiteral,
+                        loc,
+                        self.source[begin_byte..self.byte_pos].into(),
+                    )
+                } else {
+                    Token::new(
+                        TokenKind::UnterminatedCharacterLiteral,
+                        loc,
+                        self.source[begin_byte..self.byte_pos].into(),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -763,6 +956,16 @@ impl fmt::Display for Token {
                     self.source.escape_default()
                 )
             }
+            TokenKind::UnterminatedCharacterLiteral => {
+                write!(
+                    f,
+                    "Unterminated Character Literal `{}`",
+                    self.source.escape_default()
+                )
+            }
+            TokenKind::EmptyCharacterLiteral => {
+                write!(f, "Empty Character Literal")
+            }
             TokenKind::StringLiteral => write!(f, "{}", self.source.escape_default()),
             TokenKind::CharacterLiteral => write!(f, "{}", self.source.escape_default()),
             _ => write!(f, "{}", self.source),
@@ -795,7 +998,9 @@ impl Token {
     /// Attempts to unescape this token as a string literal.
     pub fn unescape(&self) -> String {
         match self.kind {
-            TokenKind::StringLiteral => token_string_unescape(self.source()),
+            TokenKind::StringLiteral | TokenKind::CharacterLiteral => {
+                token_string_unescape(self.source())
+            }
             _ => todo!(),
         }
     }
@@ -811,6 +1016,7 @@ pub fn token_string_unescape(source: &str) -> String {
                 match ch {
                     'r' => buffer.push('\r'),
                     'n' => buffer.push('\n'),
+                    't' => buffer.push('\t'),
                     '"' => buffer.push('"'),
                     '\'' => buffer.push('\''),
                     '\\' => buffer.push('\\'),
@@ -819,7 +1025,7 @@ pub fn token_string_unescape(source: &str) -> String {
                 }
                 esc = false;
             }
-            '"' => return buffer,
+            '"' | '\'' => return buffer,
             '\\' => {
                 esc = true;
                 continue;
@@ -838,6 +1044,11 @@ pub enum TokenKind {
     UnexpectedCharacter,
     InvalidEscapeSequence,
     UnterminatedStringLiteral,
+    UnterminatedCharacterLiteral,
+    EmptyCharacterLiteral,
+
+    Custom(u32),
+    CustomTag(&'static str),
 
     OpenParen,
     CloseParen,
@@ -1329,6 +1540,115 @@ mod tests {
         let t = lex.next();
         assert_eq!(t.kind, TokenKind::OpenBracket);
         assert_eq!(t.source(), "[");
+    }
+
+    #[test]
+    fn test_character_literals() {
+        let source = "'a' '🔥' '\\n' '\\t' '\\r' '\\\\' '\\'' '\\0' '\\x41' '\\u{1F525}'";
+        let mut lex = Lexer::new(source);
+
+        let t1 = lex.next();
+        assert_eq!(t1.kind, TokenKind::CharacterLiteral);
+        assert_eq!(t1.source(), "'a'");
+        assert_eq!(t1.unescape(), "a");
+
+        let t2 = lex.next();
+        assert_eq!(t2.kind, TokenKind::CharacterLiteral);
+        assert_eq!(t2.source(), "'🔥'");
+        assert_eq!(t2.unescape(), "🔥");
+
+        let t3 = lex.next();
+        assert_eq!(t3.kind, TokenKind::CharacterLiteral);
+        assert_eq!(t3.source(), "'\\n'");
+        assert_eq!(t3.unescape(), "\n");
+
+        let t4 = lex.next();
+        assert_eq!(t4.kind, TokenKind::CharacterLiteral);
+        assert_eq!(t4.source(), "'\\t'");
+        assert_eq!(t4.unescape(), "\t");
+
+        let t5 = lex.next();
+        assert_eq!(t5.kind, TokenKind::CharacterLiteral);
+        assert_eq!(t5.source(), "'\\r'");
+        assert_eq!(t5.unescape(), "\r");
+
+        let t6 = lex.next();
+        assert_eq!(t6.kind, TokenKind::CharacterLiteral);
+        assert_eq!(t6.source(), "'\\\\'");
+        assert_eq!(t6.unescape(), "\\");
+
+        let t7 = lex.next();
+        assert_eq!(t7.kind, TokenKind::CharacterLiteral);
+        assert_eq!(t7.source(), "'\\''");
+        assert_eq!(t7.unescape(), "'");
+
+        let t8 = lex.next();
+        assert_eq!(t8.kind, TokenKind::CharacterLiteral);
+        assert_eq!(t8.source(), "'\\0'");
+        assert_eq!(t8.unescape(), "\0");
+
+        let t9 = lex.next();
+        assert_eq!(t9.kind, TokenKind::CharacterLiteral);
+        assert_eq!(t9.source(), "'\\x41'");
+
+        let t10 = lex.next();
+        assert_eq!(t10.kind, TokenKind::CharacterLiteral);
+        assert_eq!(t10.source(), "'\\u{1F525}'");
+    }
+
+    #[test]
+    fn test_character_literal_errors() {
+        let mut lex = Lexer::new("''");
+        let t = lex.next();
+        assert_eq!(t.kind, TokenKind::EmptyCharacterLiteral);
+
+        let mut lex = Lexer::new("'a");
+        let t = lex.next();
+        assert_eq!(t.kind, TokenKind::UnterminatedCharacterLiteral);
+
+        let mut lex = Lexer::new("'\\z'");
+        let t = lex.next();
+        assert_eq!(t.kind, TokenKind::InvalidEscapeSequence);
+    }
+
+    #[test]
+    fn test_custom_rules() {
+        fn custom_at_mention(lex: &mut Lexer) -> Option<Token> {
+            let save = lex.save();
+            let tok = lex.next();
+            if tok.kind == TokenKind::At {
+                let next = lex.next();
+                if next.kind == TokenKind::Identifier {
+                    return Some(Token::new(
+                        TokenKind::CustomTag("mention"),
+                        tok.loc,
+                        format!("@{}", next.source()).into(),
+                    ));
+                }
+            }
+            lex.restore(save);
+            None
+        }
+
+        fn custom_tilde_operator(lex: &mut Lexer) -> Option<Token> {
+            let loc = lex.loc;
+            if lex.source[..lex.byte_pos].ends_with('~') {
+                return Some(Token::new(TokenKind::Custom(42), loc, "~".into()));
+            }
+            None
+        }
+
+        let mut lex = Lexer::new("@user ~")
+            .with_pre_rule(custom_at_mention)
+            .with_post_rule(custom_tilde_operator);
+
+        let t1 = lex.next();
+        assert_eq!(t1.kind, TokenKind::CustomTag("mention"));
+        assert_eq!(t1.source(), "@user");
+
+        let t2 = lex.next();
+        assert_eq!(t2.kind, TokenKind::Custom(42));
+        assert_eq!(t2.source(), "~");
     }
 }
 
