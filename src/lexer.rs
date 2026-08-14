@@ -131,6 +131,12 @@ impl<'src> Lexer<'src> {
         self.peeked.as_ref().unwrap()
     }
 
+    pub fn advance_by_n(&mut self, n: usize) {
+        for _ in 0..n {
+            self.advance();
+        }
+    }
+
     fn advance(&mut self) -> char {
         let ch = self.read_char();
         self.byte_pos += ch.len_utf8();
@@ -777,6 +783,24 @@ impl<'src> Lexer<'src> {
                 }
             }
         }
+    }
+
+    pub fn curr_loc(&self) -> Loc {
+        self.loc
+    }
+
+    pub fn curr_ends_with_char(&self, c: char) -> bool {
+        if self.byte_pos > self.source.len() {
+            return false;
+        }
+        self.source[..self.byte_pos].ends_with(c)
+    }
+
+    pub fn curr_ends_with_str(&self, s: &str) -> bool {
+        if self.byte_pos > self.source.len() {
+            return false;
+        }
+        self.source[..self.byte_pos].ends_with(s)
     }
 }
 
@@ -1631,8 +1655,8 @@ mod tests {
         }
 
         fn custom_tilde_operator(lex: &mut Lexer) -> Option<Token> {
-            let loc = lex.loc;
-            if lex.source[..lex.byte_pos].ends_with('~') {
+            let loc = lex.curr_loc();
+            if lex.curr_ends_with_char('~') {
                 return Some(Token::new(TokenKind::Custom(42), loc, "~".into()));
             }
             None
@@ -1649,6 +1673,28 @@ mod tests {
         let t2 = lex.next();
         assert_eq!(t2.kind, TokenKind::Custom(42));
         assert_eq!(t2.source(), "~");
+    }
+
+    #[test]
+    fn test_lexer_helper_methods() {
+        let mut lex = Lexer::new("abc 123 🔥");
+        assert_eq!(lex.curr_loc(), Loc::new(1, 1));
+        assert!(!lex.curr_ends_with_char('a'));
+        assert!(!lex.curr_ends_with_str("abc"));
+
+        lex.advance_by_n(3);
+        assert_eq!(lex.curr_loc(), Loc::new(1, 4));
+        assert!(lex.curr_ends_with_char('c'));
+        assert!(lex.curr_ends_with_str("abc"));
+
+        let tok1 = lex.next(); // lexer skips space, returns "123"
+        assert_eq!(tok1.source(), "123");
+        assert!(lex.curr_ends_with_str("123"));
+
+        let tok2 = lex.next(); // lexer skips space, returns "🔥"
+        assert_eq!(tok2.source(), "🔥");
+        assert!(lex.curr_ends_with_char('🔥'));
+        assert!(lex.curr_ends_with_str("🔥"));
     }
 }
 

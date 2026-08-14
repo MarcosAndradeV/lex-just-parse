@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-08-13
+
+### Added
+- Added `Lexer::advance_by_n(n)` helper method to advance lexer position by `n` characters.
+- Added `Lexer::curr_loc()` helper method to query the current location.
+- Added `Lexer::curr_ends_with_char(c)` and `Lexer::curr_ends_with_str(s)` helper methods to inspect token boundaries.
+
 ## [1.3.0] - 2026-08-07
 
 ### Added
