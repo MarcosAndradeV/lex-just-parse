@@ -10,7 +10,7 @@ pub type RuleFn = for<'a, 'src> fn(&'a mut Lexer<'src>) -> Option<Token>;
 /// A stream-based lexical analyzer capable of interpreting string sources.
 ///
 /// `Lexer` sequentially reads the underlying string slice and produces
-/// tokens on demand via the [`next()`](Self::next) and [`peek()`](Self::peek) methods.
+/// tokens on demand via the [`next_token()`](Self::next_token) and [`peek()`](Self::peek) methods.
 #[derive(Debug, Clone)]
 pub struct Lexer<'src> {
     source: &'src str,
@@ -33,8 +33,7 @@ pub struct LexerSavePoint {
 }
 
 impl<'src> Lexer<'src> {
-    #[cfg(feature = "interning")]
-    /// Creates a new `Lexer` given a source string slice.
+    /// Creates a new `Lexer` given a file path and a source string slice.
     pub fn new(file_path: impl Into<String>, source: &'src str) -> Self {
         Self {
             source,
@@ -51,30 +50,12 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    #[cfg(not(feature = "interning"))]
-    /// Creates a new `Lexer` given a source string slice.
-    pub fn new(source: &'src str) -> Self {
-        Self {
-            source,
-            data: source.chars().collect(),
-            loc: Loc::new(1, 1),
-            pos: 0,
-            byte_pos: 0,
-            peeked: None,
-            keywords: Vec::new(),
-            pre_rules: Vec::new(),
-            post_rules: Vec::new(),
-            in_pre_rule: false,
-            in_post_rule: false,
-        }
-    }
-
     pub fn save(&self) -> LexerSavePoint {
-        return LexerSavePoint {
+        LexerSavePoint {
             pos: self.pos,
             byte_pos: self.byte_pos,
             loc: self.loc,
-        };
+        }
     }
 
     pub fn restore(&mut self, savepoint: LexerSavePoint) {
@@ -114,16 +95,16 @@ impl<'src> Lexer<'src> {
 
     /// Returns the next token in the stream, consuming it in the process.
     /// If an EOF is reached, it will continue to return `EOF` tokens.
-    pub fn next(&mut self) -> Token {
+    pub fn next_token(&mut self) -> Token {
         if let Some(peek) = self.peeked.take() {
             peek
         } else {
-            self.next_token()
+            self._next_token()
         }
     }
 
     /// Returns a reference to the next token without consuming it.
-    /// Subsequent calls to `peek()` or `next()` will return this same token.
+    /// Subsequent calls to `peek()` or `next_token()` will return this same token.
     pub fn peek(&mut self) -> &Token {
         if self.peeked.is_none() {
             self.peeked = Some(self.next_token());
@@ -154,7 +135,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn next_token(&mut self) -> Token {
+    fn _next_token(&mut self) -> Token {
         while self.pos <= self.data.len() {
             if !self.in_pre_rule {
                 self.in_pre_rule = true;
@@ -804,65 +785,34 @@ impl<'src> Lexer<'src> {
     }
 }
 
-/// A type representing a token's source string, which can be either an owned `String`
-/// or a leaked `&'static str` when the `interning` feature is enabled.
+/// A type representing an interned token source string (`&'static str`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TokenSource(
-    #[cfg(feature = "interning")] pub &'static str,
-    #[cfg(not(feature = "interning"))] pub String,
-);
+pub struct TokenSource(pub &'static str);
 
 impl TokenSource {
-    #[cfg(feature = "interning")]
     pub fn as_str(&self) -> &'static str {
         self.0
-    }
-
-    #[cfg(not(feature = "interning"))]
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
     }
 }
 
 impl PartialEq<str> for TokenSource {
     #[inline]
     fn eq(&self, other: &str) -> bool {
-        #[cfg(feature = "interning")]
-        {
-            self.0 == other
-        }
-        #[cfg(not(feature = "interning"))]
-        {
-            self.0 == *other
-        }
+        self.0 == other
     }
 }
 
 impl PartialEq<&str> for TokenSource {
     #[inline]
     fn eq(&self, other: &&str) -> bool {
-        #[cfg(feature = "interning")]
-        {
-            self.0 == *other
-        }
-        #[cfg(not(feature = "interning"))]
-        {
-            self.0 == *other
-        }
+        self.0 == *other
     }
 }
 
 impl PartialEq<String> for TokenSource {
     #[inline]
     fn eq(&self, other: &String) -> bool {
-        #[cfg(feature = "interning")]
-        {
-            self.0 == other
-        }
-        #[cfg(not(feature = "interning"))]
-        {
-            self.0 == *other
-        }
+        self.0 == other
     }
 }
 
@@ -871,14 +821,7 @@ impl std::ops::Deref for TokenSource {
 
     #[inline]
     fn deref(&self) -> &str {
-        #[cfg(feature = "interning")]
-        {
-            self.0
-        }
-        #[cfg(not(feature = "interning"))]
-        {
-            &self.0
-        }
+        self.0
     }
 }
 
@@ -892,50 +835,27 @@ impl fmt::Display for TokenSource {
 impl From<&str> for TokenSource {
     #[inline]
     fn from(s: &str) -> Self {
-        #[cfg(feature = "interning")]
-        {
-            Self(intern(s))
-        }
-        #[cfg(not(feature = "interning"))]
-        {
-            Self(s.to_string())
-        }
+        Self(intern(s))
     }
 }
 
 impl From<String> for TokenSource {
     #[inline]
     fn from(s: String) -> Self {
-        #[cfg(feature = "interning")]
-        {
-            Self(intern(&s))
-        }
-        #[cfg(not(feature = "interning"))]
-        {
-            Self(s)
-        }
+        Self(intern(&s))
     }
 }
 
 impl From<&String> for TokenSource {
     #[inline]
     fn from(s: &String) -> Self {
-        #[cfg(feature = "interning")]
-        {
-            Self(intern(s.as_str()))
-        }
-        #[cfg(not(feature = "interning"))]
-        {
-            Self(s.clone())
-        }
+        Self(intern(s.as_str()))
     }
 }
 
-#[cfg(feature = "interning")]
 static INTERNER: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> =
     std::sync::OnceLock::new();
 
-#[cfg(feature = "interning")]
 fn intern(s: &str) -> &'static str {
     let mut interner = INTERNER
         .get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
@@ -1190,40 +1110,28 @@ impl TokenKind {
     }
 }
 
-/// Captures physical location in the parsed source, specifically the line and column number.
+/// Captures physical location in the parsed source, specifically the file path, line, and column number.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Loc {
     pub line: usize,
     pub col: usize,
-    #[cfg(feature = "interning")]
+
     file_path: &'static str,
 }
 
 impl fmt::Display for Loc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        #[cfg(feature = "interning")]
-        {
-            write!(f, "{}:{}:{}", self.file_path, self.line, self.col)
-        }
-        #[cfg(not(feature = "interning"))]
-        {
-            write!(f, "{}:{}", self.line, self.col)
-        }
+        write!(f, "{}:{}:{}", self.file_path, self.line, self.col)
     }
 }
 
 impl Loc {
-    #[cfg(feature = "interning")]
     pub fn new(file_path: impl Into<String>, line: usize, col: usize) -> Self {
         Self {
             file_path: intern(&file_path.into()),
             line,
             col,
         }
-    }
-    #[cfg(not(feature = "interning"))]
-    pub fn new(line: usize, col: usize) -> Self {
-        Self { line, col }
     }
 
     pub fn next_column(&mut self) {
@@ -1252,55 +1160,54 @@ impl Loc {
         }
     }
 
-    #[cfg(feature = "interning")]
     pub fn file_path(&self) -> &&'static str {
         &self.file_path
     }
 }
 
-#[cfg(not(feature = "interning"))]
+// #[cfg(not(feature = "interning"))]
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_lexer_init_and_eof() {
-        let mut lexer = Lexer::new("");
-        let tok = lexer.next();
+        let mut lexer = Lexer::new("", "");
+        let tok = lexer.next_token();
         assert_eq!(tok.kind, TokenKind::EOF);
         assert!(tok.is_eof());
 
-        let tok2 = lexer.next();
+        let tok2 = lexer.next_token();
         assert_eq!(tok2.kind, TokenKind::EOF);
     }
 
     #[test]
     fn test_lexer_peek() {
-        let mut lexer = Lexer::new("abc");
+        let mut lexer = Lexer::new("<test>", "abc");
         let peeked = lexer.peek().clone();
         assert_eq!(peeked.kind, TokenKind::Identifier);
         assert_eq!(peeked.source(), "abc");
-        let next = lexer.next();
+        let next = lexer.next_token();
         assert_eq!(next, peeked);
-        assert_eq!(lexer.next().kind, TokenKind::EOF);
+        assert_eq!(lexer.next_token().kind, TokenKind::EOF);
     }
 
     #[test]
     fn test_comment_skipping() {
         let source = "   // this is a line comment\n  identifier";
-        let mut lexer = Lexer::new(source);
-        let tok = lexer.next();
+        let mut lexer = Lexer::new("<test>", source);
+        let tok = lexer.next_token();
         assert_eq!(tok.kind, TokenKind::Identifier);
         assert_eq!(tok.source(), "identifier");
         assert_eq!(tok.loc.line, 2);
-        assert_eq!(lexer.next().kind, TokenKind::EOF);
+        assert_eq!(lexer.next_token().kind, TokenKind::EOF);
     }
 
     #[test]
     fn test_shebang_skipping() {
         let source = "#!/usr/bin/env rust\nidentifier";
-        let mut lexer = Lexer::new(source);
-        let tok = lexer.next();
+        let mut lexer = Lexer::new("<test>", source);
+        let tok = lexer.next_token();
         assert_eq!(tok.kind, TokenKind::Identifier);
         assert_eq!(tok.source(), "identifier");
         assert_eq!(tok.loc.line, 2);
@@ -1309,14 +1216,14 @@ mod tests {
     #[test]
     fn test_keywords() {
         let source = "var let my_ident";
-        let mut lexer = Lexer::new(source).with_keywords(&["var", "let"]);
-        let t1 = lexer.next();
+        let mut lexer = Lexer::new("<test>", source).with_keywords(&["var", "let"]);
+        let t1 = lexer.next_token();
         assert_eq!(t1.kind, TokenKind::Keyword);
         assert_eq!(t1.source(), "var");
-        let t2 = lexer.next();
+        let t2 = lexer.next_token();
         assert_eq!(t2.kind, TokenKind::Keyword);
         assert_eq!(t2.source(), "let");
-        let t3 = lexer.next();
+        let t3 = lexer.next_token();
         assert_eq!(t3.kind, TokenKind::Identifier);
         assert_eq!(t3.source(), "my_ident");
     }
@@ -1324,10 +1231,10 @@ mod tests {
     #[test]
     fn test_identifiers() {
         let source = "a _a a123 _123_abc";
-        let mut lexer = Lexer::new(source);
+        let mut lexer = Lexer::new("<test>", source);
         let idents = ["a", "_a", "a123", "_123_abc"];
         for expected in idents {
-            let tok = lexer.next();
+            let tok = lexer.next_token();
             assert_eq!(tok.kind, TokenKind::Identifier);
             assert_eq!(tok.source(), expected);
         }
@@ -1336,88 +1243,88 @@ mod tests {
     #[test]
     fn test_location_tracking() {
         let source = "a\n\tb";
-        let mut lexer = Lexer::new(source);
-        let t1 = lexer.next();
+        let mut lexer = Lexer::new("<test>", source);
+        let t1 = lexer.next_token();
         assert_eq!(t1.source(), "a");
-        assert_eq!(t1.loc, Loc::new(1, 2));
-        let t2 = lexer.next();
+        assert_eq!(t1.loc, Loc::new("<test>", 1, 2));
+        let t2 = lexer.next_token();
         assert_eq!(t2.source(), "b");
         // After 'a', we have '\n'. line becomes 2, col becomes 1.
         // Then we have '\t'. col is calculated as:
         // self.col = (self.col / ts) * ts + ts;
         // ts = 8. (1 / 8)*8 + 8 = 8.
         // And when 'b' is read, self.loc.next('b') advances the col to 9.
-        assert_eq!(t2.loc, Loc::new(2, 9));
+        assert_eq!(t2.loc, Loc::new("<test>", 2, 9));
     }
 
     #[test]
     fn test_multi_char_operators() {
         let source = "-> == := <= >= != && || :: ...";
-        let mut lex = Lexer::new(source);
-        assert_eq!(lex.next().kind, TokenKind::Arrow);
-        assert_eq!(lex.next().kind, TokenKind::EqEq);
-        assert_eq!(lex.next().kind, TokenKind::Assign);
-        assert_eq!(lex.next().kind, TokenKind::LtEq);
-        assert_eq!(lex.next().kind, TokenKind::GtEq);
-        assert_eq!(lex.next().kind, TokenKind::NotEq);
-        assert_eq!(lex.next().kind, TokenKind::DoubleAmpersand);
-        assert_eq!(lex.next().kind, TokenKind::DoublePipe);
-        assert_eq!(lex.next().kind, TokenKind::DoubleColon);
-        assert_eq!(lex.next().kind, TokenKind::Ellipsis);
+        let mut lex = Lexer::new("<test>", source);
+        assert_eq!(lex.next_token().kind, TokenKind::Arrow);
+        assert_eq!(lex.next_token().kind, TokenKind::EqEq);
+        assert_eq!(lex.next_token().kind, TokenKind::Assign);
+        assert_eq!(lex.next_token().kind, TokenKind::LtEq);
+        assert_eq!(lex.next_token().kind, TokenKind::GtEq);
+        assert_eq!(lex.next_token().kind, TokenKind::NotEq);
+        assert_eq!(lex.next_token().kind, TokenKind::DoubleAmpersand);
+        assert_eq!(lex.next_token().kind, TokenKind::DoublePipe);
+        assert_eq!(lex.next_token().kind, TokenKind::DoubleColon);
+        assert_eq!(lex.next_token().kind, TokenKind::Ellipsis);
     }
 
     #[test]
     fn test_single_and_compound_operators() {
         let source = ", ; : \\ = < > ! + ++ += - -= . * *= / /= % %= $ & ^ | ( ) [ ] { } @ ?";
-        let mut lex = Lexer::new(source);
-        assert_eq!(lex.next().kind, TokenKind::Comma);
-        assert_eq!(lex.next().kind, TokenKind::SemiColon);
-        assert_eq!(lex.next().kind, TokenKind::Colon);
-        assert_eq!(lex.next().kind, TokenKind::BackSlash);
-        assert_eq!(lex.next().kind, TokenKind::Eq);
-        assert_eq!(lex.next().kind, TokenKind::Lt);
-        assert_eq!(lex.next().kind, TokenKind::Gt);
-        assert_eq!(lex.next().kind, TokenKind::Bang);
-        assert_eq!(lex.next().kind, TokenKind::Plus);
-        assert_eq!(lex.next().kind, TokenKind::Concat); // ++
-        assert_eq!(lex.next().kind, TokenKind::PlusEq); // +=
-        assert_eq!(lex.next().kind, TokenKind::Minus);
-        assert_eq!(lex.next().kind, TokenKind::MinusEq); // -=
-        assert_eq!(lex.next().kind, TokenKind::Dot);
-        assert_eq!(lex.next().kind, TokenKind::Asterisk);
-        assert_eq!(lex.next().kind, TokenKind::AsteriskEq); // *=
-        assert_eq!(lex.next().kind, TokenKind::Slash);
-        assert_eq!(lex.next().kind, TokenKind::SlashEq); // /=
-        assert_eq!(lex.next().kind, TokenKind::Mod);
-        assert_eq!(lex.next().kind, TokenKind::ModEq); // %=
-        assert_eq!(lex.next().kind, TokenKind::Dollar);
-        assert_eq!(lex.next().kind, TokenKind::Ampersand);
-        assert_eq!(lex.next().kind, TokenKind::Caret);
-        assert_eq!(lex.next().kind, TokenKind::Pipe);
-        assert_eq!(lex.next().kind, TokenKind::OpenParen);
-        assert_eq!(lex.next().kind, TokenKind::CloseParen);
-        assert_eq!(lex.next().kind, TokenKind::OpenBracket);
-        assert_eq!(lex.next().kind, TokenKind::CloseBracket);
-        assert_eq!(lex.next().kind, TokenKind::OpenCurly);
-        assert_eq!(lex.next().kind, TokenKind::CloseCurly);
-        assert_eq!(lex.next().kind, TokenKind::At);
-        assert_eq!(lex.next().kind, TokenKind::Question);
+        let mut lex = Lexer::new("<test>", source);
+        assert_eq!(lex.next_token().kind, TokenKind::Comma);
+        assert_eq!(lex.next_token().kind, TokenKind::SemiColon);
+        assert_eq!(lex.next_token().kind, TokenKind::Colon);
+        assert_eq!(lex.next_token().kind, TokenKind::BackSlash);
+        assert_eq!(lex.next_token().kind, TokenKind::Eq);
+        assert_eq!(lex.next_token().kind, TokenKind::Lt);
+        assert_eq!(lex.next_token().kind, TokenKind::Gt);
+        assert_eq!(lex.next_token().kind, TokenKind::Bang);
+        assert_eq!(lex.next_token().kind, TokenKind::Plus);
+        assert_eq!(lex.next_token().kind, TokenKind::Concat); // ++
+        assert_eq!(lex.next_token().kind, TokenKind::PlusEq); // +=
+        assert_eq!(lex.next_token().kind, TokenKind::Minus);
+        assert_eq!(lex.next_token().kind, TokenKind::MinusEq); // -=
+        assert_eq!(lex.next_token().kind, TokenKind::Dot);
+        assert_eq!(lex.next_token().kind, TokenKind::Asterisk);
+        assert_eq!(lex.next_token().kind, TokenKind::AsteriskEq); // *=
+        assert_eq!(lex.next_token().kind, TokenKind::Slash);
+        assert_eq!(lex.next_token().kind, TokenKind::SlashEq); // /=
+        assert_eq!(lex.next_token().kind, TokenKind::Mod);
+        assert_eq!(lex.next_token().kind, TokenKind::ModEq); // %=
+        assert_eq!(lex.next_token().kind, TokenKind::Dollar);
+        assert_eq!(lex.next_token().kind, TokenKind::Ampersand);
+        assert_eq!(lex.next_token().kind, TokenKind::Caret);
+        assert_eq!(lex.next_token().kind, TokenKind::Pipe);
+        assert_eq!(lex.next_token().kind, TokenKind::OpenParen);
+        assert_eq!(lex.next_token().kind, TokenKind::CloseParen);
+        assert_eq!(lex.next_token().kind, TokenKind::OpenBracket);
+        assert_eq!(lex.next_token().kind, TokenKind::CloseBracket);
+        assert_eq!(lex.next_token().kind, TokenKind::OpenCurly);
+        assert_eq!(lex.next_token().kind, TokenKind::CloseCurly);
+        assert_eq!(lex.next_token().kind, TokenKind::At);
+        assert_eq!(lex.next_token().kind, TokenKind::Question);
     }
 
     #[test]
     fn test_directives() {
-        let mut lex = Lexer::new("#define ABC");
-        let tok = lex.next();
+        let mut lex = Lexer::new("<test>", "#define ABC");
+        let tok = lex.next_token();
         assert_eq!(tok.kind, TokenKind::Directive);
         assert_eq!(tok.source(), "#define");
 
-        let mut lex2 = Lexer::new("#!/bin/bash\n#include");
-        let tok2 = lex2.next();
+        let mut lex2 = Lexer::new("<test>", "#!/bin/bash\n#include");
+        let tok2 = lex2.next_token();
         assert_eq!(tok2.kind, TokenKind::Directive);
         assert_eq!(tok2.source(), "#include");
 
-        let mut lex3 = Lexer::new(" #!");
-        let tok3 = lex3.next();
+        let mut lex3 = Lexer::new("<test>", " #!");
+        let tok3 = lex3.next_token();
         assert_eq!(tok3.kind, TokenKind::Directive);
         assert_eq!(tok3.source(), "#");
     }
@@ -1425,25 +1332,25 @@ mod tests {
     #[test]
     fn test_numeric_bases() {
         let source = "123 0b101 0o755 0xFF 1.23";
-        let mut lex = Lexer::new(source);
+        let mut lex = Lexer::new("<test>", source);
 
-        let t1 = lex.next();
+        let t1 = lex.next_token();
         assert_eq!(t1.kind, TokenKind::Number(NumberBase::D));
         assert_eq!(t1.source(), "123");
 
-        let t2 = lex.next();
+        let t2 = lex.next_token();
         assert_eq!(t2.kind, TokenKind::Number(NumberBase::B));
         assert_eq!(t2.source(), "101");
 
-        let t3 = lex.next();
+        let t3 = lex.next_token();
         assert_eq!(t3.kind, TokenKind::Number(NumberBase::O));
         assert_eq!(t3.source(), "755");
 
-        let t4 = lex.next();
+        let t4 = lex.next_token();
         assert_eq!(t4.kind, TokenKind::Number(NumberBase::X));
         assert_eq!(t4.source(), "FF");
 
-        let t5 = lex.next();
+        let t5 = lex.next_token();
         assert_eq!(t5.kind, TokenKind::RealNumber);
         assert_eq!(t5.source(), "1.23");
     }
@@ -1474,34 +1381,34 @@ mod tests {
 
     #[test]
     fn test_string_literals() {
-        let mut lex = Lexer::new("\"hello\"");
-        let t = lex.next();
+        let mut lex = Lexer::new("<test>", "\"hello\"");
+        let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::StringLiteral);
         assert_eq!(t.source(), "\"hello\"");
         assert_eq!(t.unescape(), "hello");
 
-        let mut lex = Lexer::new("\"hello\\nworld\"");
-        let t = lex.next();
+        let mut lex = Lexer::new("<test>", "\"hello\\nworld\"");
+        let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::StringLiteral);
         assert_eq!(t.unescape(), "hello\nworld");
 
-        let mut lex = Lexer::new("\"hello\\x\"");
-        let t = lex.next();
+        let mut lex = Lexer::new("<test>", "\"hello\\x\"");
+        let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::InvalidEscapeSequence);
         assert_eq!(t.source(), "\"hello\\");
 
-        let mut lex = Lexer::new("\"hello");
-        let t = lex.next();
+        let mut lex = Lexer::new("<test>", "\"hello");
+        let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::UnterminatedStringLiteral);
         assert_eq!(t.source(), "\"hello");
     }
 
     #[test]
     fn test_token_helpers_and_display() {
-        let loc = Loc::new(5, 10);
+        let loc = Loc::new("<test>", 5, 10);
         let token = Token::new(TokenKind::Identifier, loc, "foo".into());
         assert!(!token.is_eof());
-        assert_eq!(format!("{}", loc), "5:10");
+        assert_eq!(format!("{}", loc), "<test>:5:10");
         assert_eq!(format!("{}", token), "foo");
 
         let eof_token = Token::new(TokenKind::EOF, loc, "".into());
@@ -1542,26 +1449,26 @@ mod tests {
 
     #[test]
     fn test_unexpected_character() {
-        let mut lex = Lexer::new("~");
-        let t = lex.next();
+        let mut lex = Lexer::new("<test>", "~");
+        let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::UnexpectedCharacter);
         assert_eq!(t.source(), "~");
     }
 
     #[test]
     fn test_savepoint() {
-        let mut lex = Lexer::new("arr[1]");
-        let t = lex.next();
+        let mut lex = Lexer::new("<test>", "arr[1]");
+        let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::Identifier);
         assert_eq!(t.source(), "arr");
         let savepoint = lex.save();
-        let t = lex.next();
+        let t = lex.next_token();
         if t.kind == TokenKind::OpenParen {
             assert!(false, "test_savepoint");
         } else {
             lex.restore(savepoint);
         }
-        let t = lex.next();
+        let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::OpenBracket);
         assert_eq!(t.source(), "[");
     }
@@ -1569,69 +1476,69 @@ mod tests {
     #[test]
     fn test_character_literals() {
         let source = "'a' '🔥' '\\n' '\\t' '\\r' '\\\\' '\\'' '\\0' '\\x41' '\\u{1F525}'";
-        let mut lex = Lexer::new(source);
+        let mut lex = Lexer::new("<test>", source);
 
-        let t1 = lex.next();
+        let t1 = lex.next_token();
         assert_eq!(t1.kind, TokenKind::CharacterLiteral);
         assert_eq!(t1.source(), "'a'");
         assert_eq!(t1.unescape(), "a");
 
-        let t2 = lex.next();
+        let t2 = lex.next_token();
         assert_eq!(t2.kind, TokenKind::CharacterLiteral);
         assert_eq!(t2.source(), "'🔥'");
         assert_eq!(t2.unescape(), "🔥");
 
-        let t3 = lex.next();
+        let t3 = lex.next_token();
         assert_eq!(t3.kind, TokenKind::CharacterLiteral);
         assert_eq!(t3.source(), "'\\n'");
         assert_eq!(t3.unescape(), "\n");
 
-        let t4 = lex.next();
+        let t4 = lex.next_token();
         assert_eq!(t4.kind, TokenKind::CharacterLiteral);
         assert_eq!(t4.source(), "'\\t'");
         assert_eq!(t4.unescape(), "\t");
 
-        let t5 = lex.next();
+        let t5 = lex.next_token();
         assert_eq!(t5.kind, TokenKind::CharacterLiteral);
         assert_eq!(t5.source(), "'\\r'");
         assert_eq!(t5.unescape(), "\r");
 
-        let t6 = lex.next();
+        let t6 = lex.next_token();
         assert_eq!(t6.kind, TokenKind::CharacterLiteral);
         assert_eq!(t6.source(), "'\\\\'");
         assert_eq!(t6.unescape(), "\\");
 
-        let t7 = lex.next();
+        let t7 = lex.next_token();
         assert_eq!(t7.kind, TokenKind::CharacterLiteral);
         assert_eq!(t7.source(), "'\\''");
         assert_eq!(t7.unescape(), "'");
 
-        let t8 = lex.next();
+        let t8 = lex.next_token();
         assert_eq!(t8.kind, TokenKind::CharacterLiteral);
         assert_eq!(t8.source(), "'\\0'");
         assert_eq!(t8.unescape(), "\0");
 
-        let t9 = lex.next();
+        let t9 = lex.next_token();
         assert_eq!(t9.kind, TokenKind::CharacterLiteral);
         assert_eq!(t9.source(), "'\\x41'");
 
-        let t10 = lex.next();
+        let t10 = lex.next_token();
         assert_eq!(t10.kind, TokenKind::CharacterLiteral);
         assert_eq!(t10.source(), "'\\u{1F525}'");
     }
 
     #[test]
     fn test_character_literal_errors() {
-        let mut lex = Lexer::new("''");
-        let t = lex.next();
+        let mut lex = Lexer::new("<test>", "''");
+        let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::EmptyCharacterLiteral);
 
-        let mut lex = Lexer::new("'a");
-        let t = lex.next();
+        let mut lex = Lexer::new("<test>", "'a");
+        let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::UnterminatedCharacterLiteral);
 
-        let mut lex = Lexer::new("'\\z'");
-        let t = lex.next();
+        let mut lex = Lexer::new("<test>", "'\\z'");
+        let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::InvalidEscapeSequence);
     }
 
@@ -1639,9 +1546,9 @@ mod tests {
     fn test_custom_rules() {
         fn custom_at_mention(lex: &mut Lexer) -> Option<Token> {
             let save = lex.save();
-            let tok = lex.next();
+            let tok = lex.next_token();
             if tok.kind == TokenKind::At {
-                let next = lex.next();
+                let next = lex.next_token();
                 if next.kind == TokenKind::Identifier {
                     return Some(Token::new(
                         TokenKind::CustomTag("mention"),
@@ -1662,46 +1569,40 @@ mod tests {
             None
         }
 
-        let mut lex = Lexer::new("@user ~")
+        let mut lex = Lexer::new("<test>", "@user ~")
             .with_pre_rule(custom_at_mention)
             .with_post_rule(custom_tilde_operator);
 
-        let t1 = lex.next();
+        let t1 = lex.next_token();
         assert_eq!(t1.kind, TokenKind::CustomTag("mention"));
         assert_eq!(t1.source(), "@user");
 
-        let t2 = lex.next();
+        let t2 = lex.next_token();
         assert_eq!(t2.kind, TokenKind::Custom(42));
         assert_eq!(t2.source(), "~");
     }
 
     #[test]
     fn test_lexer_helper_methods() {
-        let mut lex = Lexer::new("abc 123 🔥");
-        assert_eq!(lex.curr_loc(), Loc::new(1, 1));
+        let mut lex = Lexer::new("<test>", "abc 123 🔥");
+        assert_eq!(lex.curr_loc(), Loc::new("<test>", 1, 1));
         assert!(!lex.curr_ends_with_char('a'));
         assert!(!lex.curr_ends_with_str("abc"));
 
         lex.advance_by_n(3);
-        assert_eq!(lex.curr_loc(), Loc::new(1, 4));
+        assert_eq!(lex.curr_loc(), Loc::new("<test>", 1, 4));
         assert!(lex.curr_ends_with_char('c'));
         assert!(lex.curr_ends_with_str("abc"));
 
-        let tok1 = lex.next(); // lexer skips space, returns "123"
+        let tok1 = lex.next_token(); // lexer skips space, returns "123"
         assert_eq!(tok1.source(), "123");
         assert!(lex.curr_ends_with_str("123"));
 
-        let tok2 = lex.next(); // lexer skips space, returns "🔥"
+        let tok2 = lex.next_token(); // lexer skips space, returns "🔥"
         assert_eq!(tok2.source(), "🔥");
         assert!(lex.curr_ends_with_char('🔥'));
         assert!(lex.curr_ends_with_str("🔥"));
     }
-}
-
-#[cfg(feature = "interning")]
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn test_str_token_source_eq() {
@@ -1714,8 +1615,8 @@ mod tests {
     fn test_string_interning_pointer_equality() {
         let source = "my_var my_var";
         let mut lex = Lexer::new(file!(), source);
-        let t1 = lex.next();
-        let t2 = lex.next();
+        let t1 = lex.next_token();
+        let t2 = lex.next_token();
         assert_eq!(t1.source(), "my_var");
         assert_eq!(t2.source(), "my_var");
 

@@ -10,6 +10,3 @@ license-file = "LICENSE"
 exclude = ["tasks/", "proj.gss"]
 
 [dependencies]
-
-[features]
-interning = []
