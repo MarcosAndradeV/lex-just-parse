@@ -82,10 +82,10 @@ impl<'lex, T, E> Parser<'lex, T, E> {
         F: FnOnce(&T),
     {
         match self {
-            Parser::Success(lexer, e) =>{
+            Parser::Success(lexer, e) => {
                 f(&e);
                 Parser::Success(lexer, e)
-            },
+            }
             Parser::Fail(lexer, e) => Parser::Fail(lexer, e),
         }
     }
@@ -97,9 +97,7 @@ impl<'lex, T, E> Parser<'lex, T, E> {
         F: FnOnce(&E),
     {
         match self {
-            Parser::Success(lexer, e) =>{
-                Parser::Success(lexer, e)
-            },
+            Parser::Success(lexer, e) => Parser::Success(lexer, e),
             Parser::Fail(lexer, e) => {
                 f(&e);
                 Parser::Fail(lexer, e)
@@ -227,14 +225,14 @@ mod tests {
 
     #[test]
     fn test_parser_success_and_fail_variants() {
-        let mut lexer = Lexer::new("<test>","abc");
+        let mut lexer = Lexer::new("<test>", "abc");
         let result_success = parse_ident(&mut lexer, "abc");
         match result_success {
             Parser::Success(_, val) => assert_eq!(val, "abc"),
             _ => panic!("Expected Success"),
         }
 
-        let mut lexer = Lexer::new("<test>","xyz");
+        let mut lexer = Lexer::new("<test>", "xyz");
         let result_fail = parse_ident(&mut lexer, "abc");
         match result_fail {
             Parser::Fail(_, err) => assert!(err.contains("Expected identifier 'abc'")),
@@ -244,11 +242,11 @@ mod tests {
 
     #[test]
     fn test_parser_success_method() {
-        let mut lexer = Lexer::new("<test>","abc");
+        let mut lexer = Lexer::new("<test>", "abc");
         let result = parse_ident(&mut lexer, "abc").success();
         assert_eq!(result.ok().unwrap(), "abc");
 
-        let mut lexer2 = Lexer::new("<test>","xyz");
+        let mut lexer2 = Lexer::new("<test>", "xyz");
         let result2 = parse_ident(&mut lexer2, "abc").success();
         assert!(result2.is_err());
         let (remaining_lexer, err) = result2.err().unwrap();
@@ -259,7 +257,7 @@ mod tests {
     #[test]
     fn test_parser_or_else() {
         // Test standard or_else functionality where first parser fails and second succeeds
-        let mut lexer = Lexer::new("<test>","xyz");
+        let mut lexer = Lexer::new("<test>", "xyz");
         let result = parse_ident(&mut lexer, "abc").or_else(|lex| parse_ident(lex, "xyz"));
 
         match result {
@@ -268,7 +266,7 @@ mod tests {
         }
 
         // Test or_else where first parser succeeds (second should not run)
-        let mut lexer = Lexer::new("<test>","abc");
+        let mut lexer = Lexer::new("<test>", "abc");
         let result = parse_ident(&mut lexer, "abc")
             .or_else(|_lex| panic!("Should not execute or_else fallback when first succeeded"));
         match result {
@@ -281,7 +279,7 @@ mod tests {
     fn test_parser_and_then() {
         // Test chaining with and_then
         // We want to parse "abc" then "xyz"
-        let mut lexer = Lexer::new("<test>","abc xyz");
+        let mut lexer = Lexer::new("<test>", "abc xyz");
         let result = parse_ident(&mut lexer, "abc").and_then(|lex, first_val| {
             parse_ident(lex, "xyz")
                 .and_then(|lex, second_val| Parser::Success(lex, (first_val, second_val)))
@@ -296,7 +294,7 @@ mod tests {
         }
 
         // Test and_then failure propagation
-        let mut lexer2 = Lexer::new("<test>","abc error");
+        let mut lexer2 = Lexer::new("<test>", "abc error");
         let result2 =
             parse_ident(&mut lexer2, "abc").and_then(|lex, _first_val| parse_ident(lex, "xyz"));
         match result2 {
@@ -305,7 +303,7 @@ mod tests {
         }
 
         // Test and_then when first parser fails (second should not run)
-        let mut lexer3 = Lexer::new("<test>","error xyz");
+        let mut lexer3 = Lexer::new("<test>", "error xyz");
         let result3 = parse_ident(&mut lexer3, "abc").and_then(
             |_lex, _first_val| -> Parser<String, String> {
                 panic!("Should not execute and_then function when first failed")
@@ -326,7 +324,7 @@ mod tests {
             Parser::Success(lex, (first, second))
         }
 
-        let mut lexer = Lexer::new("<test>","abc xyz");
+        let mut lexer = Lexer::new("<test>", "abc xyz");
         let res = parse_pair(&mut lexer);
         match res {
             Parser::Success(_, (v1, v2)) => {
@@ -336,7 +334,7 @@ mod tests {
             _ => panic!("Expected success using try_parse!"),
         }
 
-        let mut lexer2 = Lexer::new("<test>","abc err");
+        let mut lexer2 = Lexer::new("<test>", "abc err");
         let res2 = parse_pair(&mut lexer2);
         match res2 {
             Parser::Fail(_, err) => assert!(err.contains("Expected identifier 'xyz'")),
@@ -354,7 +352,7 @@ mod tests {
             Parser::Success(lex, (first, second))
         }
 
-        let mut lexer = Lexer::new("<test>","abc xyz");
+        let mut lexer = Lexer::new("<test>", "abc xyz");
         let res = parse_pair_in_place(&mut lexer);
         match res {
             Parser::Success(_, (v1, v2)) => {
@@ -364,7 +362,7 @@ mod tests {
             _ => panic!("Expected success using try_parse! in-place"),
         }
 
-        let mut lexer2 = Lexer::new("<test>","abc err");
+        let mut lexer2 = Lexer::new("<test>", "abc err");
         let res2 = parse_pair_in_place(&mut lexer2);
         match res2 {
             Parser::Fail(_, err) => assert!(err.contains("Expected identifier 'xyz'")),
@@ -374,7 +372,7 @@ mod tests {
 
     #[test]
     fn test_combinator_many() {
-        let mut lexer = Lexer::new("<test>","abc abc abc xyz");
+        let mut lexer = Lexer::new("<test>", "abc abc abc xyz");
         let result = many(&mut lexer, |l| parse_ident(l, "abc"));
         match result {
             Parser::Success(remaining_lexer, items) => {
@@ -384,7 +382,7 @@ mod tests {
             _ => panic!("Expected Success for many"),
         }
 
-        let mut lexer2 = Lexer::new("<test>","xyz");
+        let mut lexer2 = Lexer::new("<test>", "xyz");
         let result2 = many(&mut lexer2, |l| parse_ident(l, "abc"));
         match result2 {
             Parser::Success(remaining_lexer, items) => {
@@ -397,7 +395,7 @@ mod tests {
 
     #[test]
     fn test_combinator_many1() {
-        let mut lexer = Lexer::new("<test>","abc abc xyz");
+        let mut lexer = Lexer::new("<test>", "abc abc xyz");
         let result = many1(&mut lexer, |l| parse_ident(l, "abc"));
         match result {
             Parser::Success(remaining_lexer, items) => {
@@ -407,7 +405,7 @@ mod tests {
             _ => panic!("Expected Success for many1"),
         }
 
-        let mut lexer2 = Lexer::new("<test>","xyz");
+        let mut lexer2 = Lexer::new("<test>", "xyz");
         let result2 = many1(&mut lexer2, |l| parse_ident(l, "abc"));
         match result2 {
             Parser::Fail(remaining_lexer, err) => {
@@ -430,7 +428,7 @@ mod tests {
             }
         }
 
-        let mut lexer = Lexer::new("<test>","abc , abc , abc ;");
+        let mut lexer = Lexer::new("<test>", "abc , abc , abc ;");
         let result = sep_by(&mut lexer, |l| parse_ident(l, "abc"), parse_comma);
         match result {
             Parser::Success(remaining_lexer, items) => {
@@ -440,7 +438,7 @@ mod tests {
             _ => panic!("Expected Success for sep_by"),
         }
 
-        let mut lexer2 = Lexer::new("<test>","xyz");
+        let mut lexer2 = Lexer::new("<test>", "xyz");
         let result2 = sep_by(&mut lexer2, |l| parse_ident(l, "abc"), parse_comma);
         match result2 {
             Parser::Success(remaining_lexer, items) => {

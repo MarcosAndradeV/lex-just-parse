@@ -5,17 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2026-10-27
 
 ### Added
+- Added `zero-copy` Cargo feature and `'src` lifetime parameter to `Token<'src>`, `TokenSource<'src>`, and `LexerSavePoint<'src>` to allow borrowing token slices directly from the input source without interning.
 - Added `Lexer::from_source(source)` convenience constructor with default `"<anonymous>"` file path.
-- Implemented `Iterator<Item = Token>` for `Lexer` (yields tokens until `TokenKind::EOF`).
-- Added `Copy` derive to `Token`, `TokenSource`, and `LexerSavePoint`, plus `Debug`, `PartialEq`, and `Eq` on `LexerSavePoint`.
+- Implemented `Iterator<Item = Token<'src>>` for `Lexer<'src>` (yields tokens until `TokenKind::EOF`).
+- Added `Copy` derive to `Token<'src>`, `TokenSource<'src>`, and `LexerSavePoint<'src>`, plus `Debug`, `PartialEq`, and `Eq` on `LexerSavePoint<'src>`.
 - Added `NumberBaseError` and `TryFrom<u32>` for `NumberBase`.
 - Added `\t`, `\xHH`, and `\u{...}` escape support in string literals and `token_string_unescape`.
 - Emitted `TokenKind::InvalidNumber` for malformed numeric literals (e.g., `0x` without digits, invalid base digits like `0b102`, or invalid trailing alphanumeric suffixes like `123abc`).
 
 ### Changed
+- **Breaking:** Added `'src` lifetime parameter to `Token<'src>`, `TokenSource<'src>`, `LexerSavePoint<'src>`, and `RuleFn` (`for<'a, 'src> fn(&'a mut Lexer<'src>) -> Option<Token<'src>>`).
 - **Breaking:** Renamed `Lexer::next()` to `Lexer::next_token()`.
 - **Breaking:** `Lexer::new` now requires a `file_path` as its first parameter (`Lexer::new(file_path, source)`).
 - **Breaking:** Removed optional `interning` Cargo feature; string interning is now built-in and always enabled across `TokenSource` (`&'static str`).

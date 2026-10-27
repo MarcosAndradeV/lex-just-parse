@@ -5,7 +5,7 @@
 ## Features
 
 - **Zero-Allocation Stream Lexing:** Directly slices UTF-8 string sources on demand via `next_token()`, `peek()`, or standard `Iterator` methods (`for token in lexer`).
-- **Built-in String Interning:** All token source strings are automatically interned into `'static` string slices (`TokenSource`), making `Token` `Copy` and enabling fast pointer-level equality checks.
+- **Built-in String Interning & Optional `zero-copy` Mode:** By default, token source strings are interned (`TokenSource<'src>`), enabling fast pointer-level equality checks. Enable the `zero-copy` Cargo feature to borrow slices directly from the input `&'src str` without touching the global interner.
 - **Rich Token Categories:** Supports identifiers, keywords, numbers in multiple bases (binary, octal, decimal, hex) with `InvalidNumber` validation, string & character literals (with `\xHH` and `\u{...}` escapes), preprocessor directives, and single/multi-character operators.
 - **Custom Rules & Hooks:** Intercept tokenization with `with_pre_rule` and `with_post_rule` to produce `TokenKind::Custom(u32)` or `TokenKind::CustomTag(&'static str)`.
 - **Backtracking & Savepoints:** Save and restore lexer positions effortlessly (`save()` / `restore()`), preserving peeked token caches across speculative lookaheads.
@@ -20,7 +20,10 @@ Add `lex-just-parse` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-lex-just-parse = "1.3"
+lex-just-parse = "2.0"
+
+# Or enable zero-copy token slicing:
+# lex-just-parse = { version = "2.0", features = ["zero-copy"] }
 ```
 
 ### Basic Lexing Example
@@ -47,14 +50,14 @@ fn main() {
 
 ## Key Capabilities
 
-### 1. Built-in String Interning (`TokenSource`)
+### 1. String Interning & `zero-copy` Mode (`TokenSource<'src>`)
 
-All token textual representations are wrapped in `TokenSource`, which stores an interned `&'static str`. This makes token cloning cheap and allows direct equality comparisons against `&str`, `&String`, or `String`:
+All token textual representations are wrapped in `TokenSource<'src>`. By default, strings are interned into a global pool. When the `zero-copy` Cargo feature is enabled, `TokenSource<'src>` borrows `&'src str` slices directly from the input source with zero allocations or mutex locks. In both modes, `Token<'src>` is `Copy` and supports direct equality comparisons against `&str`, `&String`, or `String`:
 
 ```rust
 let token = lexer.next_token();
 assert_eq!(token.source(), "var");
-assert_eq!(token.source, "var"); // TokenSource implements PartialEq<str>
+assert_eq!(token.source, "var"); // TokenSource<'src> implements PartialEq<str>
 ```
 
 ### 2. Character Literals & Escape Sequences
@@ -89,7 +92,7 @@ Register custom pre-rules (evaluated before standard token rules) or post-rules 
 ```rust
 use lex_just_parse::lexer::{Lexer, Token, TokenKind};
 
-fn parse_mention(lex: &mut Lexer) -> Option<Token> {
+fn parse_mention<'src>(lex: &mut Lexer<'src>) -> Option<Token<'src>> {
     let save = lex.save();
     let tok = lex.next_token();
     if tok.kind == TokenKind::At {

@@ -5,7 +5,7 @@
 use std::fmt;
 
 /// A custom rule function for lexing custom tokens.
-pub type RuleFn = for<'a, 'src> fn(&'a mut Lexer<'src>) -> Option<Token>;
+pub type RuleFn = for<'a, 'src> fn(&'a mut Lexer<'src>) -> Option<Token<'src>>;
 
 /// A stream-based lexical analyzer capable of interpreting string sources.
 ///
@@ -16,7 +16,7 @@ pub struct Lexer<'src> {
     source: &'src str,
     byte_pos: usize,
     loc: Loc,
-    peeked: Option<Token>,
+    peeked: Option<Token<'src>>,
     keywords: Vec<&'src str>,
     pre_rules: Vec<RuleFn>,
     post_rules: Vec<RuleFn>,
@@ -25,10 +25,10 @@ pub struct Lexer<'src> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct LexerSavePoint {
+pub struct LexerSavePoint<'src> {
     byte_pos: usize,
     loc: Loc,
-    peeked: Option<Token>,
+    peeked: Option<Token<'src>>,
 }
 
 impl<'src> Lexer<'src> {
@@ -52,7 +52,7 @@ impl<'src> Lexer<'src> {
         Self::new("<anonymous>", source)
     }
 
-    pub fn save(&self) -> LexerSavePoint {
+    pub fn save(&self) -> LexerSavePoint<'src> {
         LexerSavePoint {
             byte_pos: self.byte_pos,
             loc: self.loc,
@@ -60,7 +60,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    pub fn restore(&mut self, savepoint: LexerSavePoint) {
+    pub fn restore(&mut self, savepoint: LexerSavePoint<'src>) {
         let LexerSavePoint {
             byte_pos,
             loc,
@@ -101,7 +101,7 @@ impl<'src> Lexer<'src> {
 
     /// Returns the next token in the stream, consuming it in the process.
     /// If an EOF is reached, it will continue to return `EOF` tokens.
-    pub fn next_token(&mut self) -> Token {
+    pub fn next_token(&mut self) -> Token<'src> {
         if let Some(peek) = self.peeked.take() {
             peek
         } else {
@@ -111,7 +111,7 @@ impl<'src> Lexer<'src> {
 
     /// Returns a reference to the next token without consuming it.
     /// Subsequent calls to `peek()` or `next_token()` will return this same token.
-    pub fn peek(&mut self) -> &Token {
+    pub fn peek(&mut self) -> &Token<'src> {
         if self.peeked.is_none() {
             self.peeked = Some(self.next_token());
         }
@@ -125,7 +125,11 @@ impl<'src> Lexer<'src> {
     }
 
     fn advance(&mut self) -> char {
-        if let Some(ch) = self.source.get(self.byte_pos..).and_then(|s| s.chars().next()) {
+        if let Some(ch) = self
+            .source
+            .get(self.byte_pos..)
+            .and_then(|s| s.chars().next())
+        {
             self.byte_pos += ch.len_utf8();
             self.loc.next(ch);
             ch
@@ -141,7 +145,12 @@ impl<'src> Lexer<'src> {
             .unwrap_or('\0')
     }
 
-    fn _next_token(&mut self) -> Token {
+    #[inline]
+    fn slice_source(&self, begin_byte: usize) -> TokenSource<'src> {
+        (&self.source[begin_byte..self.byte_pos]).into()
+    }
+
+    fn _next_token(&mut self) -> Token<'src> {
         while self.byte_pos < self.source.len() {
             if !self.in_pre_rule {
                 self.in_pre_rule = true;
@@ -181,302 +190,132 @@ impl<'src> Lexer<'src> {
                             break;
                         }
                     }
-                    Token::new(
-                        TokenKind::Directive,
-                        loc,
-                        self.source[begin_byte..self.byte_pos].into(),
-                    )
+                    Token::new(TokenKind::Directive, loc, self.slice_source(begin_byte))
                 }
                 '-' if self.read_char() == '>' => {
                     self.advance();
-                    Token::new(
-                        TokenKind::Arrow,
-                        loc,
-                        self.source[begin_byte..self.byte_pos].into(),
-                    )
+                    Token::new(TokenKind::Arrow, loc, self.slice_source(begin_byte))
                 }
                 '=' if self.read_char() == '=' => {
                     self.advance();
-                    Token::new(
-                        TokenKind::Eq,
-                        loc,
-                        self.source[begin_byte..self.byte_pos].into(),
-                    )
+                    Token::new(TokenKind::Eq, loc, self.slice_source(begin_byte))
                 }
                 ':' if self.read_char() == '=' => {
                     self.advance();
-                    Token::new(
-                        TokenKind::ColonAssign,
-                        loc,
-                        self.source[begin_byte..self.byte_pos].into(),
-                    )
+                    Token::new(TokenKind::ColonAssign, loc, self.slice_source(begin_byte))
                 }
                 '<' if self.read_char() == '=' => {
                     self.advance();
-                    Token::new(
-                        TokenKind::LtEq,
-                        loc,
-                        self.source[begin_byte..self.byte_pos].into(),
-                    )
+                    Token::new(TokenKind::LtEq, loc, self.slice_source(begin_byte))
                 }
                 '>' if self.read_char() == '=' => {
                     self.advance();
-                    Token::new(
-                        TokenKind::GtEq,
-                        loc,
-                        self.source[begin_byte..self.byte_pos].into(),
-                    )
+                    Token::new(TokenKind::GtEq, loc, self.slice_source(begin_byte))
                 }
                 '!' if self.read_char() == '=' => {
                     self.advance();
-                    Token::new(
-                        TokenKind::NotEq,
-                        loc,
-                        self.source[begin_byte..self.byte_pos].into(),
-                    )
+                    Token::new(TokenKind::NotEq, loc, self.slice_source(begin_byte))
                 }
                 '&' if self.read_char() == '&' => {
                     self.advance();
                     Token::new(
                         TokenKind::DoubleAmpersand,
                         loc,
-                        self.source[begin_byte..self.byte_pos].into(),
+                        self.slice_source(begin_byte),
                     )
                 }
                 '|' if self.read_char() == '|' => {
                     self.advance();
-                    Token::new(
-                        TokenKind::DoublePipe,
-                        loc,
-                        self.source[begin_byte..self.byte_pos].into(),
-                    )
+                    Token::new(TokenKind::DoublePipe, loc, self.slice_source(begin_byte))
                 }
                 ':' if self.read_char() == ':' => {
                     self.advance();
-                    Token::new(
-                        TokenKind::DoubleColon,
-                        loc,
-                        self.source[begin_byte..self.byte_pos].into(),
-                    )
+                    Token::new(TokenKind::DoubleColon, loc, self.slice_source(begin_byte))
                 }
                 '.' if self.source[self.byte_pos..].starts_with("..") => {
                     self.advance();
                     self.advance();
-                    Token::new(
-                        TokenKind::Ellipsis,
-                        loc,
-                        self.source[begin_byte..self.byte_pos].into(),
-                    )
+                    Token::new(TokenKind::Ellipsis, loc, self.slice_source(begin_byte))
                 }
-                ch if ch.is_alphabetic() || ch == '_' => return self.lex_identifier(begin_byte, loc),
+                ch if ch.is_alphabetic() || ch == '_' => {
+                    return self.lex_identifier(begin_byte, loc);
+                }
                 '0'..='9' => return self.lex_number(begin_byte, loc, ch),
                 '"' => return self.lex_string(begin_byte, loc),
                 '\'' => return self.lex_char(begin_byte, loc),
 
-                ',' => Token::new(
-                    TokenKind::Comma,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                ';' => Token::new(
-                    TokenKind::SemiColon,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                ':' => Token::new(
-                    TokenKind::Colon,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '\\' => Token::new(
-                    TokenKind::BackSlash,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '=' => Token::new(
-                    TokenKind::Assign,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '<' => Token::new(
-                    TokenKind::Lt,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '>' => Token::new(
-                    TokenKind::Gt,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '!' => Token::new(
-                    TokenKind::Bang,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
+                ',' => Token::new(TokenKind::Comma, loc, self.slice_source(begin_byte)),
+                ';' => Token::new(TokenKind::SemiColon, loc, self.slice_source(begin_byte)),
+                ':' => Token::new(TokenKind::Colon, loc, self.slice_source(begin_byte)),
+                '\\' => Token::new(TokenKind::BackSlash, loc, self.slice_source(begin_byte)),
+                '=' => Token::new(TokenKind::Assign, loc, self.slice_source(begin_byte)),
+                '<' => Token::new(TokenKind::Lt, loc, self.slice_source(begin_byte)),
+                '>' => Token::new(TokenKind::Gt, loc, self.slice_source(begin_byte)),
+                '!' => Token::new(TokenKind::Bang, loc, self.slice_source(begin_byte)),
                 '+' => {
                     let next = self.read_char();
                     if next == '+' {
                         self.advance();
-                        Token::new(
-                            TokenKind::Concat,
-                            loc,
-                            self.source[begin_byte..self.byte_pos].into(),
-                        )
+                        Token::new(TokenKind::Concat, loc, self.slice_source(begin_byte))
                     } else if next == '=' {
                         self.advance();
-                        Token::new(
-                            TokenKind::PlusEq,
-                            loc,
-                            self.source[begin_byte..self.byte_pos].into(),
-                        )
+                        Token::new(TokenKind::PlusEq, loc, self.slice_source(begin_byte))
                     } else {
-                        Token::new(
-                            TokenKind::Plus,
-                            loc,
-                            self.source[begin_byte..self.byte_pos].into(),
-                        )
+                        Token::new(TokenKind::Plus, loc, self.slice_source(begin_byte))
                     }
                 }
                 '-' => {
                     let next = self.read_char();
                     if next == '>' {
                         self.advance();
-                        Token::new(
-                            TokenKind::Arrow,
-                            loc,
-                            self.source[begin_byte..self.byte_pos].into(),
-                        )
+                        Token::new(TokenKind::Arrow, loc, self.slice_source(begin_byte))
                     } else if next == '=' {
                         self.advance();
-                        Token::new(
-                            TokenKind::MinusEq,
-                            loc,
-                            self.source[begin_byte..self.byte_pos].into(),
-                        )
+                        Token::new(TokenKind::MinusEq, loc, self.slice_source(begin_byte))
                     } else {
-                        Token::new(
-                            TokenKind::Minus,
-                            loc,
-                            self.source[begin_byte..self.byte_pos].into(),
-                        )
+                        Token::new(TokenKind::Minus, loc, self.slice_source(begin_byte))
                     }
                 }
-                '.' => Token::new(
-                    TokenKind::Dot,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
+                '.' => Token::new(TokenKind::Dot, loc, self.slice_source(begin_byte)),
                 '*' => {
                     let next = self.read_char();
                     if next == '=' {
                         self.advance();
-                        Token::new(
-                            TokenKind::AsteriskEq,
-                            loc,
-                            self.source[begin_byte..self.byte_pos].into(),
-                        )
+                        Token::new(TokenKind::AsteriskEq, loc, self.slice_source(begin_byte))
                     } else {
-                        Token::new(
-                            TokenKind::Asterisk,
-                            loc,
-                            self.source[begin_byte..self.byte_pos].into(),
-                        )
+                        Token::new(TokenKind::Asterisk, loc, self.slice_source(begin_byte))
                     }
                 }
                 '/' => {
                     let next = self.read_char();
                     if next == '=' {
                         self.advance();
-                        Token::new(
-                            TokenKind::SlashEq,
-                            loc,
-                            self.source[begin_byte..self.byte_pos].into(),
-                        )
+                        Token::new(TokenKind::SlashEq, loc, self.slice_source(begin_byte))
                     } else {
-                        Token::new(
-                            TokenKind::Slash,
-                            loc,
-                            self.source[begin_byte..self.byte_pos].into(),
-                        )
+                        Token::new(TokenKind::Slash, loc, self.slice_source(begin_byte))
                     }
                 }
                 '%' => {
                     let next = self.read_char();
                     if next == '=' {
                         self.advance();
-                        Token::new(
-                            TokenKind::ModEq,
-                            loc,
-                            self.source[begin_byte..self.byte_pos].into(),
-                        )
+                        Token::new(TokenKind::ModEq, loc, self.slice_source(begin_byte))
                     } else {
-                        Token::new(
-                            TokenKind::Mod,
-                            loc,
-                            self.source[begin_byte..self.byte_pos].into(),
-                        )
+                        Token::new(TokenKind::Mod, loc, self.slice_source(begin_byte))
                     }
                 }
-                '$' => Token::new(
-                    TokenKind::Dollar,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '@' => Token::new(
-                    TokenKind::At,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '?' => Token::new(
-                    TokenKind::Question,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '&' => Token::new(
-                    TokenKind::Ampersand,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '^' => Token::new(
-                    TokenKind::Caret,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '|' => Token::new(
-                    TokenKind::Pipe,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '(' => Token::new(
-                    TokenKind::OpenParen,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                ')' => Token::new(
-                    TokenKind::CloseParen,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '[' => Token::new(
-                    TokenKind::OpenBracket,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                ']' => Token::new(
-                    TokenKind::CloseBracket,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '{' => Token::new(
-                    TokenKind::OpenCurly,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
-                '}' => Token::new(
-                    TokenKind::CloseCurly,
-                    loc,
-                    self.source[begin_byte..self.byte_pos].into(),
-                ),
+                '$' => Token::new(TokenKind::Dollar, loc, self.slice_source(begin_byte)),
+                '@' => Token::new(TokenKind::At, loc, self.slice_source(begin_byte)),
+                '?' => Token::new(TokenKind::Question, loc, self.slice_source(begin_byte)),
+                '&' => Token::new(TokenKind::Ampersand, loc, self.slice_source(begin_byte)),
+                '^' => Token::new(TokenKind::Caret, loc, self.slice_source(begin_byte)),
+                '|' => Token::new(TokenKind::Pipe, loc, self.slice_source(begin_byte)),
+                '(' => Token::new(TokenKind::OpenParen, loc, self.slice_source(begin_byte)),
+                ')' => Token::new(TokenKind::CloseParen, loc, self.slice_source(begin_byte)),
+                '[' => Token::new(TokenKind::OpenBracket, loc, self.slice_source(begin_byte)),
+                ']' => Token::new(TokenKind::CloseBracket, loc, self.slice_source(begin_byte)),
+                '{' => Token::new(TokenKind::OpenCurly, loc, self.slice_source(begin_byte)),
+                '}' => Token::new(TokenKind::CloseCurly, loc, self.slice_source(begin_byte)),
 
                 ch if ch.is_whitespace() => continue,
                 '\0' => return Token::new(TokenKind::EOF, loc, "\0".into()),
@@ -498,7 +337,7 @@ impl<'src> Lexer<'src> {
                     return Token::new(
                         TokenKind::UnexpectedCharacter,
                         loc,
-                        self.source[begin_byte..self.byte_pos].into(),
+                        self.slice_source(begin_byte),
                     );
                 }
             };
@@ -508,7 +347,7 @@ impl<'src> Lexer<'src> {
         Token::new(TokenKind::EOF, self.loc, "".into())
     }
 
-    fn lex_identifier(&mut self, begin_byte: usize, loc: Loc) -> Token {
+    fn lex_identifier(&mut self, begin_byte: usize, loc: Loc) -> Token<'src> {
         let mut kind = TokenKind::Identifier;
         loop {
             let ch = self.read_char();
@@ -527,7 +366,7 @@ impl<'src> Lexer<'src> {
         Token::new(kind, loc, ident.into())
     }
 
-    fn lex_number(&mut self, begin_byte: usize, loc: Loc, first_ch: char) -> Token {
+    fn lex_number(&mut self, begin_byte: usize, loc: Loc, first_ch: char) -> Token<'src> {
         let mut base = 10;
 
         // Check for base prefix (0x, 0b, 0o) only when leading digit is '0'
@@ -594,19 +433,17 @@ impl<'src> Lexer<'src> {
         let end = self.byte_pos;
         if is_real {
             let num_str = &self.source[begin_byte..end];
-            return Token::new(TokenKind::RealNumber, loc, (*num_str).into());
+            return Token::new(TokenKind::RealNumber, loc, num_str.into());
         }
 
-        let num_str = &self.source[begin_byte..end]
-            .trim_start_matches("0x")
-            .trim_start_matches("0X")
-            .trim_start_matches("0b")
-            .trim_start_matches("0B")
-            .trim_start_matches("0o")
-            .trim_start_matches("0O");
+        let num_str = if base == 10 {
+            &self.source[begin_byte..end]
+        } else {
+            &self.source[digits_start_byte..end]
+        };
         let kind = TokenKind::Number(NumberBase::try_from(base).unwrap());
 
-        Token::new(kind, loc, (*num_str).into())
+        Token::new(kind, loc, num_str.into())
     }
 
     fn lex_escape_sequence(&mut self) -> bool {
@@ -662,7 +499,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn lex_string(&mut self, begin_byte: usize, loc: Loc) -> Token {
+    fn lex_string(&mut self, begin_byte: usize, loc: Loc) -> Token<'src> {
         loop {
             let ch = self.read_char();
             match ch {
@@ -674,7 +511,7 @@ impl<'src> Lexer<'src> {
                     return Token::new(
                         TokenKind::UnterminatedStringLiteral,
                         loc,
-                        self.source[begin_byte..self.byte_pos].into(),
+                        self.slice_source(begin_byte),
                     );
                 }
                 '\\' => {
@@ -683,7 +520,7 @@ impl<'src> Lexer<'src> {
                         return Token::new(
                             TokenKind::InvalidEscapeSequence,
                             loc,
-                            self.source[begin_byte..self.byte_pos].into(),
+                            self.slice_source(begin_byte),
                         );
                     }
                 }
@@ -693,14 +530,10 @@ impl<'src> Lexer<'src> {
             }
         }
 
-        Token::new(
-            TokenKind::StringLiteral,
-            loc,
-            self.source[begin_byte..self.byte_pos].into(),
-        )
+        Token::new(TokenKind::StringLiteral, loc, self.slice_source(begin_byte))
     }
 
-    fn lex_char(&mut self, begin_byte: usize, loc: Loc) -> Token {
+    fn lex_char(&mut self, begin_byte: usize, loc: Loc) -> Token<'src> {
         let next_ch = self.read_char();
 
         match next_ch {
@@ -710,7 +543,7 @@ impl<'src> Lexer<'src> {
                 Token::new(
                     TokenKind::EmptyCharacterLiteral,
                     loc,
-                    self.source[begin_byte..self.byte_pos].into(),
+                    self.slice_source(begin_byte),
                 )
             }
             '\0' | '\n' => {
@@ -718,7 +551,7 @@ impl<'src> Lexer<'src> {
                 Token::new(
                     TokenKind::UnterminatedCharacterLiteral,
                     loc,
-                    self.source[begin_byte..self.byte_pos].into(),
+                    self.slice_source(begin_byte),
                 )
             }
             '\\' => {
@@ -727,7 +560,7 @@ impl<'src> Lexer<'src> {
                     return Token::new(
                         TokenKind::InvalidEscapeSequence,
                         loc,
-                        self.source[begin_byte..self.byte_pos].into(),
+                        self.slice_source(begin_byte),
                     );
                 }
 
@@ -736,13 +569,13 @@ impl<'src> Lexer<'src> {
                     Token::new(
                         TokenKind::CharacterLiteral,
                         loc,
-                        self.source[begin_byte..self.byte_pos].into(),
+                        self.slice_source(begin_byte),
                     )
                 } else {
                     Token::new(
                         TokenKind::UnterminatedCharacterLiteral,
                         loc,
-                        self.source[begin_byte..self.byte_pos].into(),
+                        self.slice_source(begin_byte),
                     )
                 }
             }
@@ -754,13 +587,13 @@ impl<'src> Lexer<'src> {
                     Token::new(
                         TokenKind::CharacterLiteral,
                         loc,
-                        self.source[begin_byte..self.byte_pos].into(),
+                        self.slice_source(begin_byte),
                     )
                 } else {
                     Token::new(
                         TokenKind::UnterminatedCharacterLiteral,
                         loc,
-                        self.source[begin_byte..self.byte_pos].into(),
+                        self.slice_source(begin_byte),
                     )
                 }
             }
@@ -787,24 +620,21 @@ impl<'src> Lexer<'src> {
 }
 
 impl<'src> Iterator for Lexer<'src> {
-    type Item = Token;
+    type Item = Token<'src>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let tok = self.next_token();
-        if tok.is_eof() {
-            None
-        } else {
-            Some(tok)
-        }
+        if tok.is_eof() { None } else { Some(tok) }
     }
 }
 
-/// A type representing an interned token source string (`&'static str`).
+/// A type representing a token source string (`&'src str`), which is either
+/// borrowed directly when the `zero-copy` feature is enabled or interned by default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TokenSource(pub &'static str);
+pub struct TokenSource<'src>(pub &'src str);
 
-impl TokenSource {
-    pub fn as_str(&self) -> &'static str {
+impl<'src> TokenSource<'src> {
+    pub fn as_str(&self) -> &'src str {
         self.0
     }
 
@@ -815,28 +645,28 @@ impl TokenSource {
     }
 }
 
-impl PartialEq<str> for TokenSource {
+impl<'src> PartialEq<str> for TokenSource<'src> {
     #[inline]
     fn eq(&self, other: &str) -> bool {
         self.0 == other
     }
 }
 
-impl PartialEq<&str> for TokenSource {
+impl<'src> PartialEq<&str> for TokenSource<'src> {
     #[inline]
     fn eq(&self, other: &&str) -> bool {
         self.0 == *other
     }
 }
 
-impl PartialEq<String> for TokenSource {
+impl<'src> PartialEq<String> for TokenSource<'src> {
     #[inline]
     fn eq(&self, other: &String) -> bool {
         self.0 == other
     }
 }
 
-impl std::ops::Deref for TokenSource {
+impl<'src> std::ops::Deref for TokenSource<'src> {
     type Target = str;
 
     #[inline]
@@ -845,42 +675,48 @@ impl std::ops::Deref for TokenSource {
     }
 }
 
-impl fmt::Display for TokenSource {
+impl<'src> fmt::Display for TokenSource<'src> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&**self, f)
     }
 }
 
-impl From<&str> for TokenSource {
+#[cfg(feature = "zero-copy")]
+impl<'src> From<&'src str> for TokenSource<'src> {
+    #[inline]
+    fn from(s: &'src str) -> Self {
+        Self(s)
+    }
+}
+
+#[cfg(not(feature = "zero-copy"))]
+impl<'src> From<&str> for TokenSource<'src> {
     #[inline]
     fn from(s: &str) -> Self {
         Self(intern(s))
     }
 }
 
-impl From<String> for TokenSource {
+impl<'src> From<String> for TokenSource<'src> {
     #[inline]
     fn from(s: String) -> Self {
         Self(intern(&s))
     }
 }
 
-impl From<&String> for TokenSource {
+impl<'src> From<&String> for TokenSource<'src> {
     #[inline]
     fn from(s: &String) -> Self {
         Self(intern(s.as_str()))
     }
 }
 
-static INTERNER: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> =
-    std::sync::OnceLock::new();
+static INTERNER: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
 
 fn intern(s: &str) -> &'static str {
-    let mut interner = INTERNER
-        .get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
-        .lock()
-        .unwrap();
+    let mut interner = INTERNER.lock().unwrap();
     if let Some(interned) = interner.get(s) {
         interned
     } else {
@@ -892,13 +728,13 @@ fn intern(s: &str) -> &'static str {
 
 /// Represents a single analyzed token with its kind, source location, and original string segment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Token {
+pub struct Token<'src> {
     pub kind: TokenKind,
     pub loc: Loc,
-    pub source: TokenSource,
+    pub source: TokenSource<'src>,
 }
 
-impl fmt::Display for Token {
+impl<'src> fmt::Display for Token<'src> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.kind {
             TokenKind::EOF => write!(f, "EOF"),
@@ -936,14 +772,14 @@ impl fmt::Display for Token {
     }
 }
 
-impl Token {
+impl<'src> Token<'src> {
     /// Returns a string slice of the original text this token represents.
-    pub fn source(&self) -> &str {
-        &self.source
+    pub fn source(&self) -> &'src str {
+        self.source.0
     }
 
     /// Creates a new `Token` from a given kind, location, and source string.
-    pub fn new(kind: TokenKind, loc: Loc, source: TokenSource) -> Self {
+    pub fn new(kind: TokenKind, loc: Loc, source: TokenSource<'src>) -> Self {
         Self { kind, loc, source }
     }
 
@@ -1006,30 +842,26 @@ pub fn token_string_unescape(source: &str) -> String {
                         return buffer;
                     }
                 }
-                Some('u') => {
-                    if chars.peek() == Some(&'{') {
-                        chars.next(); // consume '{'
-                        let mut hex = String::new();
-                        let mut closed = false;
-                        for c in chars.by_ref() {
-                            if c == '}' {
-                                closed = true;
-                                break;
-                            }
-                            hex.push(c);
+                Some('u') if chars.peek() == Some(&'{') => {
+                    chars.next(); // consume '{'
+                    let mut hex = String::new();
+                    let mut closed = false;
+                    for c in chars.by_ref() {
+                        if c == '}' {
+                            closed = true;
+                            break;
                         }
-                        if closed && !hex.is_empty() {
-                            if let Ok(val) = u32::from_str_radix(&hex, 16) {
-                                if let Some(decoded) = char::from_u32(val) {
-                                    buffer.push(decoded);
-                                    continue;
-                                }
-                            }
-                        }
-                        return buffer;
-                    } else {
-                        return buffer;
+                        hex.push(c);
                     }
+                    if closed
+                        && !hex.is_empty()
+                        && let Ok(val) = u32::from_str_radix(&hex, 16)
+                        && let Some(decoded) = char::from_u32(val)
+                    {
+                        buffer.push(decoded);
+                        continue;
+                    }
+                    return buffer;
                 }
                 _ => return buffer,
             }
@@ -1699,7 +1531,7 @@ mod tests {
 
     #[test]
     fn test_custom_rules() {
-        fn custom_at_mention(lex: &mut Lexer) -> Option<Token> {
+        fn custom_at_mention<'src>(lex: &mut Lexer<'src>) -> Option<Token<'src>> {
             let save = lex.save();
             let tok = lex.next_token();
             if tok.kind == TokenKind::At {
@@ -1716,7 +1548,7 @@ mod tests {
             None
         }
 
-        fn custom_tilde_operator(lex: &mut Lexer) -> Option<Token> {
+        fn custom_tilde_operator<'src>(lex: &mut Lexer<'src>) -> Option<Token<'src>> {
             let loc = lex.curr_loc();
             if lex.curr_ends_with_char('~') {
                 return Some(Token::new(TokenKind::Custom(42), loc, "~".into()));
@@ -1766,6 +1598,7 @@ mod tests {
         assert_eq!(TokenSource::from("test3").as_str(), "test3");
     }
 
+    #[cfg(not(feature = "zero-copy"))]
     #[test]
     fn test_string_interning_pointer_equality() {
         let source = "my_var my_var";
@@ -1778,5 +1611,19 @@ mod tests {
         let p1 = t1.source.0;
         let p2 = t2.source.0;
         assert!(std::ptr::eq(p1, p2));
+    }
+
+    #[cfg(feature = "zero-copy")]
+    #[test]
+    fn test_zero_copy_source_slicing() {
+        let source = "my_var my_var";
+        let mut lex = Lexer::new(file!(), source);
+        let t1 = lex.next_token();
+        let t2 = lex.next_token();
+        assert_eq!(t1.source(), "my_var");
+        assert_eq!(t2.source(), "my_var");
+
+        assert_eq!(t1.source.0.as_ptr(), source[0..6].as_ptr());
+        assert_eq!(t2.source.0.as_ptr(), source[7..13].as_ptr());
     }
 }
