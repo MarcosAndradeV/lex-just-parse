@@ -9,4 +9,9 @@ repository = "https://github.com/MarcosAndradeV/lex-just-parse/"
 license-file = "LICENSE"
 exclude = ["tasks/", "proj.gss"]
 
-[dependencies]
+[features]
+zero-copy = []
+
+[[example]]
+name = "simple_c_parser"
+path = "examples/simple_c.rs"

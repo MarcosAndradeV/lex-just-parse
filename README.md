@@ -4,13 +4,13 @@
 
 ## Features
 
-- **Stream-based Lexing:** Sequentially reads and tokenizes string sources on demand via `next_token()` and `peek()`.
-- **Built-in String Interning:** All token source strings are automatically interned into `'static` string slices (`TokenSource`), providing zero-allocation copies and fast pointer-level equality checks.
-- **Rich Token Categories:** Supports identifiers, keywords, numbers in multiple bases (binary, octal, decimal, hex), string literals, character literals (with unicode/hex escapes), preprocessor directives, and single/multi-character operators.
+- **Zero-Allocation Stream Lexing:** Directly slices UTF-8 string sources on demand via `next_token()`, `peek()`, or standard `Iterator` methods (`for token in lexer`).
+- **Built-in String Interning:** All token source strings are automatically interned into `'static` string slices (`TokenSource`), making `Token` `Copy` and enabling fast pointer-level equality checks.
+- **Rich Token Categories:** Supports identifiers, keywords, numbers in multiple bases (binary, octal, decimal, hex) with `InvalidNumber` validation, string & character literals (with `\xHH` and `\u{...}` escapes), preprocessor directives, and single/multi-character operators.
 - **Custom Rules & Hooks:** Intercept tokenization with `with_pre_rule` and `with_post_rule` to produce `TokenKind::Custom(u32)` or `TokenKind::CustomTag(&'static str)`.
-- **Backtracking & Savepoints:** Save and restore lexer positions effortlessly (`save()` / `restore()`) for speculative parsing and lookaheads.
-- **Source Location Tracking:** Tracks source file, line, and column coordinates automatically (`file_path:line:col`).
-- **Parser Combinators:** Ergonomic combinators (`many`, `many1`, `sep_by`, `and_then`, `or_else`, `inspect`, `inspect_fail`, `success`) and the `try_parse!` macro for robust AST construction.
+- **Backtracking & Savepoints:** Save and restore lexer positions effortlessly (`save()` / `restore()`), preserving peeked token caches across speculative lookaheads.
+- **Source Location Tracking:** Tracks exact token start locations (`file_path:line:col`).
+- **Parser Combinators:** Ergonomic combinators (`many`, `many1`, `sep_by`, `and_then`, `or_else`, `inspect`, `inspect_fail`, `success`) with automatic backtracking on failed iterations and the `try_parse!` macro.
 
 ---
 
@@ -26,24 +26,19 @@ lex-just-parse = "1.3"
 ### Basic Lexing Example
 
 ```rust
-use lex_just_parse::lexer::{Lexer, TokenKind};
+use lex_just_parse::lexer::Lexer;
 
 fn main() {
     let source = "var x = 42;";
 
-    // Initialize the lexer with a file path and the source string,
+    // Initialize the lexer with a file path and source string (or use `Lexer::from_source(source)`),
     // and configure recognized keywords:
-    let mut lexer = Lexer::new("main.lang", source).with_keywords(&["var", "let", "fn"]);
+    let lexer = Lexer::new("main.lang", source).with_keywords(&["var", "let", "fn"]);
 
-    // Consume tokens sequentially
-    loop {
-        let token = lexer.next_token();
-
+    // Iterate over tokens using standard Rust Iterator (stops at EOF),
+    // or call `lexer.next_token()` manually in a loop:
+    for token in lexer {
         println!("{:?} `{}` at {}", token.kind, token.unescape(), token.loc);
-
-        if token.is_eof() {
-            break;
-        }
     }
 }
 ```

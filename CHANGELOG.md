@@ -7,12 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added `Lexer::from_source(source)` convenience constructor with default `"<anonymous>"` file path.
+- Implemented `Iterator<Item = Token>` for `Lexer` (yields tokens until `TokenKind::EOF`).
+- Added `Copy` derive to `Token`, `TokenSource`, and `LexerSavePoint`, plus `Debug`, `PartialEq`, and `Eq` on `LexerSavePoint`.
+- Added `NumberBaseError` and `TryFrom<u32>` for `NumberBase`.
+- Added `\t`, `\xHH`, and `\u{...}` escape support in string literals and `token_string_unescape`.
+- Emitted `TokenKind::InvalidNumber` for malformed numeric literals (e.g., `0x` without digits, invalid base digits like `0b102`, or invalid trailing alphanumeric suffixes like `123abc`).
+
 ### Changed
 - **Breaking:** Renamed `Lexer::next()` to `Lexer::next_token()`.
 - **Breaking:** `Lexer::new` now requires a `file_path` as its first parameter (`Lexer::new(file_path, source)`).
 - **Breaking:** Removed optional `interning` Cargo feature; string interning is now built-in and always enabled across `TokenSource` (`&'static str`).
+- **Breaking:** Renamed `TokenKind` equality and assignment variants to C/Rust conventions: `:=` is `TokenKind::ColonAssign`, `=` is `TokenKind::Assign`, and `==` is `TokenKind::Eq`.
+- **Breaking:** Replaced panicking `From<u32>` on `NumberBase` with `TryFrom<u32>`.
+- **Breaking:** Changed `Loc::file_path()` return type from `&&'static str` to `&'static str`.
+- Removed eager `Vec<char>` allocation in `Lexer` in favor of direct UTF-8 `&str` slicing.
 - Updated `Loc` to track the source `file_path`, formatted as `<file_path>:<line>:<col>`.
-- Updated README and Rustdoc references to reflect the new API and features.
+
+### Fixed
+- Fixed token `Loc` off-by-one column calculation by capturing `Loc` prior to advancing the first character of a token.
+- Fixed `Lexer::save()` and `Lexer::restore()` desynchronization with `peek()` by preserving `peeked` in `LexerSavePoint`.
+- Fixed `Token::unescape()` panicking with `todo!()` on non-literal tokens; it now returns the raw token source string.
+- Fixed infinite loop when a `//` line comment or `#!` shebang appears at EOF without a trailing newline.
+- Fixed `...` (`TokenKind::Ellipsis`) lookahead bug that checked the second character twice instead of checking the second and third characters.
+- Fixed `lex_number` double-advance bug on `0x`/`0b`/`0o` prefixes and restricted base prefixes to leading `0`.
+- Fixed `many`, `many1`, and `sep_by` parser combinators to automatically save and restore lexer state on failed iterations (including rolling back trailing separators in `sep_by`).
 
 ## [1.3.1] - 2026-08-13
 

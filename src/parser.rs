@@ -109,6 +109,7 @@ impl<'lex, T, E> Parser<'lex, T, E> {
 }
 
 /// Parses zero or more occurrences of `parser` until it fails.
+/// Automatically restores the lexer to the savepoint before the failed attempt.
 /// Returns the collected items and the updated lexer.
 pub fn many<'lex, T, E, F>(mut lex: RefLexer<'lex>, mut parser: F) -> Parser<'lex, Vec<T>, E>
 where
@@ -116,12 +117,14 @@ where
 {
     let mut results = Vec::new();
     loop {
+        let savepoint = lex.save();
         match parser(lex) {
             Parser::Success(next_lex, val) => {
                 results.push(val);
                 lex = next_lex;
             }
             Parser::Fail(next_lex, _) => {
+                next_lex.restore(savepoint);
                 return Parser::Success(next_lex, results);
             }
         }
@@ -129,32 +132,40 @@ where
 }
 
 /// Parses one or more occurrences of `parser`.
+/// Automatically restores the lexer to the savepoint before any failed attempt.
 /// Returns Fail if the first attempt fails.
 pub fn many1<'lex, T, E, F>(lex: RefLexer<'lex>, mut parser: F) -> Parser<'lex, Vec<T>, E>
 where
     F: FnMut(RefLexer<'lex>) -> Parser<'lex, T, E>,
 {
+    let initial_savepoint = lex.save();
     match parser(lex) {
         Parser::Success(lex, first_val) => {
             let mut results = vec![first_val];
             let mut current_lex = lex;
             loop {
+                let savepoint = current_lex.save();
                 match parser(current_lex) {
                     Parser::Success(next_lex, val) => {
                         results.push(val);
                         current_lex = next_lex;
                     }
                     Parser::Fail(next_lex, _) => {
+                        next_lex.restore(savepoint);
                         return Parser::Success(next_lex, results);
                     }
                 }
             }
         }
-        Parser::Fail(lex, err) => Parser::Fail(lex, err),
+        Parser::Fail(lex, err) => {
+            lex.restore(initial_savepoint);
+            Parser::Fail(lex, err)
+        }
     }
 }
 
 /// Parses zero or more occurrences of `parser` separated by `separator`.
+/// Automatically restores the lexer before a trailing separator or failed item attempt.
 pub fn sep_by<'lex, T, S, E, F, G>(
     lex: RefLexer<'lex>,
     mut parser: F,
@@ -164,11 +175,13 @@ where
     F: FnMut(RefLexer<'lex>) -> Parser<'lex, T, E>,
     G: FnMut(RefLexer<'lex>) -> Parser<'lex, S, E>,
 {
+    let initial_savepoint = lex.save();
     match parser(lex) {
         Parser::Success(lex, first_val) => {
             let mut results = vec![first_val];
             let mut current_lex = lex;
             loop {
+                let savepoint = current_lex.save();
                 match separator(current_lex) {
                     Parser::Success(sep_lex, _) => match parser(sep_lex) {
                         Parser::Success(next_lex, val) => {
@@ -176,16 +189,21 @@ where
                             current_lex = next_lex;
                         }
                         Parser::Fail(fail_lex, _) => {
+                            fail_lex.restore(savepoint);
                             return Parser::Success(fail_lex, results);
                         }
                     },
                     Parser::Fail(next_lex, _) => {
+                        next_lex.restore(savepoint);
                         return Parser::Success(next_lex, results);
                     }
                 }
             }
         }
-        Parser::Fail(lex, _) => Parser::Success(lex, Vec::new()),
+        Parser::Fail(lex, _) => {
+            lex.restore(initial_savepoint);
+            Parser::Success(lex, Vec::new())
+        }
     }
 }
 
@@ -430,6 +448,18 @@ mod tests {
                 assert_eq!(remaining_lexer.next_token().source(), "xyz");
             }
             _ => panic!("Expected Success for sep_by on empty sequence"),
+        }
+
+        // Trailing separator rollback when subsequent item fails
+        let mut lexer3 = Lexer::new("<test>", "abc , abc , ;");
+        let result3 = sep_by(&mut lexer3, |l| parse_ident(l, "abc"), parse_comma);
+        match result3 {
+            Parser::Success(remaining_lexer, items) => {
+                assert_eq!(items, vec!["abc", "abc"]);
+                assert_eq!(remaining_lexer.next_token().kind, TokenKind::Comma);
+                assert_eq!(remaining_lexer.next_token().kind, TokenKind::SemiColon);
+            }
+            _ => panic!("Expected Success for sep_by with trailing separator rollback"),
         }
     }
 }

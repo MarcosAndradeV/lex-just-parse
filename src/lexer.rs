@@ -14,8 +14,6 @@ pub type RuleFn = for<'a, 'src> fn(&'a mut Lexer<'src>) -> Option<Token>;
 #[derive(Debug, Clone)]
 pub struct Lexer<'src> {
     source: &'src str,
-    data: Vec<char>,
-    pos: usize,
     byte_pos: usize,
     loc: Loc,
     peeked: Option<Token>,
@@ -26,10 +24,11 @@ pub struct Lexer<'src> {
     in_post_rule: bool,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct LexerSavePoint {
-    pos: usize,
     byte_pos: usize,
     loc: Loc,
+    peeked: Option<Token>,
 }
 
 impl<'src> Lexer<'src> {
@@ -37,9 +36,7 @@ impl<'src> Lexer<'src> {
     pub fn new(file_path: impl Into<String>, source: &'src str) -> Self {
         Self {
             source,
-            data: source.chars().collect(),
             loc: Loc::new(file_path, 1, 1),
-            pos: 0,
             byte_pos: 0,
             peeked: None,
             keywords: Vec::new(),
@@ -50,19 +47,28 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// Creates a new `Lexer` from a source string slice using `"<anonymous>"` as the default file path.
+    pub fn from_source(source: &'src str) -> Self {
+        Self::new("<anonymous>", source)
+    }
+
     pub fn save(&self) -> LexerSavePoint {
         LexerSavePoint {
-            pos: self.pos,
             byte_pos: self.byte_pos,
             loc: self.loc,
+            peeked: self.peeked,
         }
     }
 
     pub fn restore(&mut self, savepoint: LexerSavePoint) {
-        let LexerSavePoint { pos, byte_pos, loc } = savepoint;
-        self.pos = pos;
+        let LexerSavePoint {
+            byte_pos,
+            loc,
+            peeked,
+        } = savepoint;
         self.byte_pos = byte_pos;
         self.loc = loc;
+        self.peeked = peeked;
     }
 
     /// Configures the lexer with a set of predefined keywords to recognize.
@@ -119,24 +125,24 @@ impl<'src> Lexer<'src> {
     }
 
     fn advance(&mut self) -> char {
-        let ch = self.read_char();
-        self.byte_pos += ch.len_utf8();
-        self.pos += 1;
-        self.loc.next(ch);
-        ch
-    }
-
-    fn read_char(&mut self) -> char {
-        let pos = self.pos;
-        if pos >= self.data.len() {
-            '\0'
+        if let Some(ch) = self.source.get(self.byte_pos..).and_then(|s| s.chars().next()) {
+            self.byte_pos += ch.len_utf8();
+            self.loc.next(ch);
+            ch
         } else {
-            self.data[pos]
+            '\0'
         }
     }
 
+    fn read_char(&self) -> char {
+        self.source
+            .get(self.byte_pos..)
+            .and_then(|s| s.chars().next())
+            .unwrap_or('\0')
+    }
+
     fn _next_token(&mut self) -> Token {
-        while self.pos <= self.data.len() {
+        while self.byte_pos < self.source.len() {
             if !self.in_pre_rule {
                 self.in_pre_rule = true;
                 let num_pre = self.pre_rules.len();
@@ -153,18 +159,18 @@ impl<'src> Lexer<'src> {
             }
 
             let begin_byte = self.byte_pos;
-            let ch = self.advance();
             let loc = self.loc;
+            let ch = self.advance();
 
             let tok = match ch {
                 '/' if self.read_char() == '/' => {
-                    while self.advance() != '\n' {}
+                    while !matches!(self.advance(), '\n' | '\0') {}
                     continue;
                 }
                 '#' => {
                     let ch = self.read_char();
-                    if self.byte_pos == 1 && ch == '!' {
-                        while self.advance() != '\n' {}
+                    if begin_byte == 0 && ch == '!' {
+                        while !matches!(self.advance(), '\n' | '\0') {}
                         continue;
                     }
                     loop {
@@ -192,7 +198,7 @@ impl<'src> Lexer<'src> {
                 '=' if self.read_char() == '=' => {
                     self.advance();
                     Token::new(
-                        TokenKind::EqEq,
+                        TokenKind::Eq,
                         loc,
                         self.source[begin_byte..self.byte_pos].into(),
                     )
@@ -200,7 +206,7 @@ impl<'src> Lexer<'src> {
                 ':' if self.read_char() == '=' => {
                     self.advance();
                     Token::new(
-                        TokenKind::Assign,
+                        TokenKind::ColonAssign,
                         loc,
                         self.source[begin_byte..self.byte_pos].into(),
                     )
@@ -253,7 +259,7 @@ impl<'src> Lexer<'src> {
                         self.source[begin_byte..self.byte_pos].into(),
                     )
                 }
-                '.' if self.read_char() == '.' && self.read_char() == '.' => {
+                '.' if self.source[self.byte_pos..].starts_with("..") => {
                     self.advance();
                     self.advance();
                     Token::new(
@@ -262,10 +268,10 @@ impl<'src> Lexer<'src> {
                         self.source[begin_byte..self.byte_pos].into(),
                     )
                 }
-                ch if ch.is_alphabetic() || ch == '_' => return self.lex_identifier(begin_byte),
-                '0'..='9' => return self.lex_number(begin_byte),
-                '"' => return self.lex_string(begin_byte),
-                '\'' => return self.lex_char(begin_byte),
+                ch if ch.is_alphabetic() || ch == '_' => return self.lex_identifier(begin_byte, loc),
+                '0'..='9' => return self.lex_number(begin_byte, loc, ch),
+                '"' => return self.lex_string(begin_byte, loc),
+                '\'' => return self.lex_char(begin_byte, loc),
 
                 ',' => Token::new(
                     TokenKind::Comma,
@@ -288,7 +294,7 @@ impl<'src> Lexer<'src> {
                     self.source[begin_byte..self.byte_pos].into(),
                 ),
                 '=' => Token::new(
-                    TokenKind::Eq,
+                    TokenKind::Assign,
                     loc,
                     self.source[begin_byte..self.byte_pos].into(),
                 ),
@@ -473,7 +479,7 @@ impl<'src> Lexer<'src> {
                 ),
 
                 ch if ch.is_whitespace() => continue,
-                '\0' => return Token::new(TokenKind::EOF, self.loc, "\0".into()),
+                '\0' => return Token::new(TokenKind::EOF, loc, "\0".into()),
                 _ => {
                     if !self.in_post_rule {
                         self.in_post_rule = true;
@@ -491,7 +497,7 @@ impl<'src> Lexer<'src> {
                     }
                     return Token::new(
                         TokenKind::UnexpectedCharacter,
-                        self.loc,
+                        loc,
                         self.source[begin_byte..self.byte_pos].into(),
                     );
                 }
@@ -502,9 +508,7 @@ impl<'src> Lexer<'src> {
         Token::new(TokenKind::EOF, self.loc, "".into())
     }
 
-    fn lex_identifier(&mut self, begin_byte: usize) -> Token {
-        let loc = self.loc;
-        #[allow(unused_mut)]
+    fn lex_identifier(&mut self, begin_byte: usize, loc: Loc) -> Token {
         let mut kind = TokenKind::Identifier;
         loop {
             let ch = self.read_char();
@@ -523,31 +527,30 @@ impl<'src> Lexer<'src> {
         Token::new(kind, loc, ident.into())
     }
 
-    fn lex_number(&mut self, begin_byte: usize) -> Token {
-        let loc = self.loc;
-        let end;
+    fn lex_number(&mut self, begin_byte: usize, loc: Loc, first_ch: char) -> Token {
         let mut base = 10;
 
-        // Check for base prefix (0x, 0b, 0o)
-        let next = self.read_char();
-        match next {
-            'x' | 'X' => {
-                base = 16;
-                self.advance(); // 0
-                self.advance(); // x
+        // Check for base prefix (0x, 0b, 0o) only when leading digit is '0'
+        if first_ch == '0' {
+            match self.read_char() {
+                'x' | 'X' => {
+                    base = 16;
+                    self.advance(); // consume 'x' / 'X'
+                }
+                'b' | 'B' => {
+                    base = 2;
+                    self.advance(); // consume 'b' / 'B'
+                }
+                'o' | 'O' => {
+                    base = 8;
+                    self.advance(); // consume 'o' / 'O'
+                }
+                _ => {}
             }
-            'b' | 'B' => {
-                base = 2;
-                self.advance(); // 0
-                self.advance(); // b
-            }
-            'o' | 'O' => {
-                base = 8;
-                self.advance(); // 0
-                self.advance(); // o
-            }
-            _ => {}
         }
+
+        let digits_start_byte = self.byte_pos;
+        let mut is_real = false;
 
         // Read digits according to base
         loop {
@@ -555,18 +558,13 @@ impl<'src> Lexer<'src> {
             let valid = match base {
                 2 => matches!(c, '0' | '1'),
                 8 => matches!(c, '0'..='7'),
-                10 if c == '.' => {
+                10 if c == '.' && !is_real && !self.source[self.byte_pos..].starts_with("..") => {
+                    is_real = true;
                     self.advance();
-                    loop {
-                        let c = self.read_char();
-                        if !c.is_ascii_digit() {
-                            break;
-                        }
+                    while self.read_char().is_ascii_digit() {
                         self.advance();
                     }
-                    end = self.byte_pos;
-                    let num_str = &self.source[begin_byte..end];
-                    return Token::new(TokenKind::RealNumber, loc, (*num_str).into());
+                    break;
                 }
                 10 => c.is_ascii_digit(),
                 16 => c.is_ascii_hexdigit(),
@@ -578,7 +576,26 @@ impl<'src> Lexer<'src> {
             self.advance();
         }
 
-        end = self.byte_pos;
+        let next_ch = self.read_char();
+        let has_invalid_suffix = next_ch.is_alphanumeric() || next_ch == '_';
+        let missing_prefixed_digits = base != 10 && self.byte_pos == digits_start_byte;
+
+        if has_invalid_suffix || missing_prefixed_digits {
+            while {
+                let c = self.read_char();
+                c.is_alphanumeric() || c == '_'
+            } {
+                self.advance();
+            }
+            let invalid_str = &self.source[begin_byte..self.byte_pos];
+            return Token::new(TokenKind::InvalidNumber, loc, invalid_str.into());
+        }
+
+        let end = self.byte_pos;
+        if is_real {
+            let num_str = &self.source[begin_byte..end];
+            return Token::new(TokenKind::RealNumber, loc, (*num_str).into());
+        }
 
         let num_str = &self.source[begin_byte..end]
             .trim_start_matches("0x")
@@ -587,14 +604,65 @@ impl<'src> Lexer<'src> {
             .trim_start_matches("0B")
             .trim_start_matches("0o")
             .trim_start_matches("0O");
-        let kind = TokenKind::Number(NumberBase::from(base));
+        let kind = TokenKind::Number(NumberBase::try_from(base).unwrap());
 
         Token::new(kind, loc, (*num_str).into())
     }
 
-    fn lex_string(&mut self, begin_byte: usize) -> Token {
-        // let mut buffer = String::new();
-        let loc = self.loc;
+    fn lex_escape_sequence(&mut self) -> bool {
+        let esc = self.read_char();
+        match esc {
+            'r' | 'n' | 't' | '"' | '\'' | '\\' | '0' => {
+                self.advance();
+                true
+            }
+            'x' => {
+                self.advance(); // consume 'x'
+                let h1 = self.read_char();
+                if h1.is_ascii_hexdigit() {
+                    self.advance();
+                    let h2 = self.read_char();
+                    if h2.is_ascii_hexdigit() {
+                        self.advance();
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            'u' => {
+                self.advance(); // consume 'u'
+                if self.read_char() == '{' {
+                    self.advance();
+                    let hex_start = self.byte_pos;
+                    let mut has_digits = false;
+                    loop {
+                        let c = self.read_char();
+                        if c.is_ascii_hexdigit() {
+                            has_digits = true;
+                            self.advance();
+                        } else if c == '}' && has_digits {
+                            let hex_str = &self.source[hex_start..self.byte_pos];
+                            self.advance();
+                            return u32::from_str_radix(hex_str, 16)
+                                .ok()
+                                .and_then(char::from_u32)
+                                .is_some();
+                        } else {
+                            return false;
+                        }
+                    }
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn lex_string(&mut self, begin_byte: usize, loc: Loc) -> Token {
         loop {
             let ch = self.read_char();
             match ch {
@@ -610,27 +678,19 @@ impl<'src> Lexer<'src> {
                     );
                 }
                 '\\' => {
-                    self.advance();
-                    let esc = self.read_char();
-                    match esc {
-                        'r' => {}  // buffer.push('\r'),
-                        'n' => {}  // buffer.push('\n'),
-                        '"' => {}  // buffer.push('"'),
-                        '\'' => {} // buffer.push('\''),
-                        '\\' => {} // buffer.push('\\'),
-                        '0' => {}  // buffer.push('\0'),
-                        _ => {
-                            return Token::new(
-                                TokenKind::InvalidEscapeSequence,
-                                loc,
-                                self.source[begin_byte..self.byte_pos].into(),
-                            );
-                        }
+                    self.advance(); // consume '\'
+                    if !self.lex_escape_sequence() {
+                        return Token::new(
+                            TokenKind::InvalidEscapeSequence,
+                            loc,
+                            self.source[begin_byte..self.byte_pos].into(),
+                        );
                     }
                 }
-                _ => {} // buffer.push(ch as char),
+                _ => {
+                    self.advance();
+                }
             }
-            self.advance();
         }
 
         Token::new(
@@ -640,8 +700,7 @@ impl<'src> Lexer<'src> {
         )
     }
 
-    fn lex_char(&mut self, begin_byte: usize) -> Token {
-        let loc = self.loc;
+    fn lex_char(&mut self, begin_byte: usize, loc: Loc) -> Token {
         let next_ch = self.read_char();
 
         match next_ch {
@@ -664,70 +723,12 @@ impl<'src> Lexer<'src> {
             }
             '\\' => {
                 self.advance(); // consume '\'
-                let esc = self.read_char();
-                match esc {
-                    'r' | 'n' | 't' | '"' | '\'' | '\\' | '0' => {
-                        self.advance();
-                    }
-                    'x' => {
-                        self.advance(); // consume 'x'
-                        let h1 = self.read_char();
-                        if h1.is_ascii_hexdigit() {
-                            self.advance();
-                            let h2 = self.read_char();
-                            if h2.is_ascii_hexdigit() {
-                                self.advance();
-                            } else {
-                                return Token::new(
-                                    TokenKind::InvalidEscapeSequence,
-                                    loc,
-                                    self.source[begin_byte..self.byte_pos].into(),
-                                );
-                            }
-                        } else {
-                            return Token::new(
-                                TokenKind::InvalidEscapeSequence,
-                                loc,
-                                self.source[begin_byte..self.byte_pos].into(),
-                            );
-                        }
-                    }
-                    'u' => {
-                        self.advance(); // consume 'u'
-                        if self.read_char() == '{' {
-                            self.advance();
-                            let mut has_digits = false;
-                            loop {
-                                let c = self.read_char();
-                                if c.is_ascii_hexdigit() {
-                                    has_digits = true;
-                                    self.advance();
-                                } else if c == '}' && has_digits {
-                                    self.advance();
-                                    break;
-                                } else {
-                                    return Token::new(
-                                        TokenKind::InvalidEscapeSequence,
-                                        loc,
-                                        self.source[begin_byte..self.byte_pos].into(),
-                                    );
-                                }
-                            }
-                        } else {
-                            return Token::new(
-                                TokenKind::InvalidEscapeSequence,
-                                loc,
-                                self.source[begin_byte..self.byte_pos].into(),
-                            );
-                        }
-                    }
-                    _ => {
-                        return Token::new(
-                            TokenKind::InvalidEscapeSequence,
-                            loc,
-                            self.source[begin_byte..self.byte_pos].into(),
-                        );
-                    }
+                if !self.lex_escape_sequence() {
+                    return Token::new(
+                        TokenKind::InvalidEscapeSequence,
+                        loc,
+                        self.source[begin_byte..self.byte_pos].into(),
+                    );
                 }
 
                 if self.read_char() == '\'' {
@@ -785,13 +786,32 @@ impl<'src> Lexer<'src> {
     }
 }
 
+impl<'src> Iterator for Lexer<'src> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let tok = self.next_token();
+        if tok.is_eof() {
+            None
+        } else {
+            Some(tok)
+        }
+    }
+}
+
 /// A type representing an interned token source string (`&'static str`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TokenSource(pub &'static str);
 
 impl TokenSource {
     pub fn as_str(&self) -> &'static str {
         self.0
+    }
+
+    /// Attempts to unescape this [`TokenSource`] as a string or character literal,
+    /// returning the raw string if it is not quoted.
+    pub fn unescape(&self) -> String {
+        token_string_unescape(self.0)
     }
 }
 
@@ -871,11 +891,10 @@ fn intern(s: &str) -> &'static str {
 }
 
 /// Represents a single analyzed token with its kind, source location, and original string segment.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Token {
     pub kind: TokenKind,
     pub loc: Loc,
-    // source: &'static str,
     pub source: TokenSource,
 }
 
@@ -920,18 +939,12 @@ impl fmt::Display for Token {
 impl Token {
     /// Returns a string slice of the original text this token represents.
     pub fn source(&self) -> &str {
-        // unsafe { transmute::<&'static str, &str>(self.source) }
         &self.source
     }
 
     /// Creates a new `Token` from a given kind, location, and source string.
     pub fn new(kind: TokenKind, loc: Loc, source: TokenSource) -> Self {
-        Self {
-            kind,
-            loc,
-            // source: unsafe { transmute::<&str, &'static str>(source) },
-            source,
-        }
+        Self { kind, loc, source }
     }
 
     /// Returns whether this token represents the End of File (`EOF`).
@@ -939,42 +952,89 @@ impl Token {
         matches!(self.kind, TokenKind::EOF)
     }
 
-    /// Attempts to unescape this token as a string literal.
+    /// Attempts to unescape this token if it is a string or character literal,
+    /// or returns the raw token source string otherwise.
     pub fn unescape(&self) -> String {
         match self.kind {
             TokenKind::StringLiteral | TokenKind::CharacterLiteral => {
                 token_string_unescape(self.source())
             }
-            _ => todo!(),
+            _ => self.source().to_string(),
         }
     }
 }
+
 pub fn token_string_unescape(source: &str) -> String {
+    let mut chars = source.chars().peekable();
+    let quote = match chars.peek().copied() {
+        Some(q @ ('"' | '\'')) => {
+            chars.next();
+            q
+        }
+        _ => return source.to_string(),
+    };
+
     let mut buffer = String::new();
-    let mut esc = false;
-    let mut src = source.chars();
-    src.next();
-    for ch in src {
-        match ch {
-            ch if esc => {
-                match ch {
-                    'r' => buffer.push('\r'),
-                    'n' => buffer.push('\n'),
-                    't' => buffer.push('\t'),
-                    '"' => buffer.push('"'),
-                    '\'' => buffer.push('\''),
-                    '\\' => buffer.push('\\'),
-                    '0' => buffer.push('\0'),
-                    _ => return buffer,
+    while let Some(ch) = chars.next() {
+        if ch == quote {
+            break;
+        }
+        if ch == '\\' {
+            match chars.next() {
+                Some('r') => buffer.push('\r'),
+                Some('n') => buffer.push('\n'),
+                Some('t') => buffer.push('\t'),
+                Some('"') => buffer.push('"'),
+                Some('\'') => buffer.push('\''),
+                Some('\\') => buffer.push('\\'),
+                Some('0') => buffer.push('\0'),
+                Some('x') => {
+                    let mut hex = String::with_capacity(2);
+                    if let Some(h1) = chars.next() {
+                        hex.push(h1);
+                    }
+                    if let Some(h2) = chars.next() {
+                        hex.push(h2);
+                    }
+                    if hex.len() == 2 {
+                        if let Ok(val) = u8::from_str_radix(&hex, 16) {
+                            buffer.push(val as char);
+                        } else {
+                            return buffer;
+                        }
+                    } else {
+                        return buffer;
+                    }
                 }
-                esc = false;
+                Some('u') => {
+                    if chars.peek() == Some(&'{') {
+                        chars.next(); // consume '{'
+                        let mut hex = String::new();
+                        let mut closed = false;
+                        for c in chars.by_ref() {
+                            if c == '}' {
+                                closed = true;
+                                break;
+                            }
+                            hex.push(c);
+                        }
+                        if closed && !hex.is_empty() {
+                            if let Ok(val) = u32::from_str_radix(&hex, 16) {
+                                if let Some(decoded) = char::from_u32(val) {
+                                    buffer.push(decoded);
+                                    continue;
+                                }
+                            }
+                        }
+                        return buffer;
+                    } else {
+                        return buffer;
+                    }
+                }
+                _ => return buffer,
             }
-            '"' | '\'' => return buffer,
-            '\\' => {
-                esc = true;
-                continue;
-            }
-            _ => buffer.push(ch),
+        } else {
+            buffer.push(ch);
         }
     }
     buffer
@@ -1019,6 +1079,9 @@ pub enum TokenKind {
     Arrow,
     BackSlash,
 
+    /// The `:=` operator.
+    ColonAssign,
+    /// The `=` operator.
     Assign,
     PlusEq,
     MinusEq,
@@ -1031,8 +1094,8 @@ pub enum TokenKind {
     Minus,
     Asterisk,
     Slash,
+    /// The `==` operator.
     Eq,
-    EqEq,
     NotEq,
     Gt,
     GtEq,
@@ -1072,14 +1135,30 @@ impl NumberBase {
     }
 }
 
-impl From<u32> for NumberBase {
-    fn from(value: u32) -> Self {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NumberBaseError {
+    UnknownBase,
+}
+
+impl fmt::Display for NumberBaseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NumberBaseError::UnknownBase => write!(f, "Unknown number base"),
+        }
+    }
+}
+
+impl std::error::Error for NumberBaseError {}
+
+impl TryFrom<u32> for NumberBase {
+    type Error = NumberBaseError;
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
-            2 => Self::B,
-            8 => Self::O,
-            10 => Self::D,
-            16 => Self::X,
-            _ => panic!("Unkwon base"),
+            2 => Ok(Self::B),
+            8 => Ok(Self::O),
+            10 => Ok(Self::D),
+            16 => Ok(Self::X),
+            _ => Err(Self::Error::UnknownBase),
         }
     }
 }
@@ -1099,8 +1178,8 @@ impl TokenKind {
     pub fn is_assign_kind(&self) -> bool {
         matches!(
             self,
-            Self::Assign
-                | Self::Eq
+            Self::ColonAssign
+                | Self::Assign
                 | Self::PlusEq
                 | Self::MinusEq
                 | Self::AsteriskEq
@@ -1160,8 +1239,8 @@ impl Loc {
         }
     }
 
-    pub fn file_path(&self) -> &&'static str {
-        &self.file_path
+    pub fn file_path(&self) -> &'static str {
+        self.file_path
     }
 }
 
@@ -1246,15 +1325,16 @@ mod tests {
         let mut lexer = Lexer::new("<test>", source);
         let t1 = lexer.next_token();
         assert_eq!(t1.source(), "a");
-        assert_eq!(t1.loc, Loc::new("<test>", 1, 2));
+        assert_eq!(t1.loc, Loc::new("<test>", 1, 1));
+        assert_eq!(t1.loc.file_path(), "<test>");
         let t2 = lexer.next_token();
         assert_eq!(t2.source(), "b");
         // After 'a', we have '\n'. line becomes 2, col becomes 1.
         // Then we have '\t'. col is calculated as:
         // self.col = (self.col / ts) * ts + ts;
         // ts = 8. (1 / 8)*8 + 8 = 8.
-        // And when 'b' is read, self.loc.next('b') advances the col to 9.
-        assert_eq!(t2.loc, Loc::new("<test>", 2, 9));
+        // 'b' starts at column 8.
+        assert_eq!(t2.loc, Loc::new("<test>", 2, 8));
     }
 
     #[test]
@@ -1262,8 +1342,8 @@ mod tests {
         let source = "-> == := <= >= != && || :: ...";
         let mut lex = Lexer::new("<test>", source);
         assert_eq!(lex.next_token().kind, TokenKind::Arrow);
-        assert_eq!(lex.next_token().kind, TokenKind::EqEq);
-        assert_eq!(lex.next_token().kind, TokenKind::Assign);
+        assert_eq!(lex.next_token().kind, TokenKind::Eq);
+        assert_eq!(lex.next_token().kind, TokenKind::ColonAssign);
         assert_eq!(lex.next_token().kind, TokenKind::LtEq);
         assert_eq!(lex.next_token().kind, TokenKind::GtEq);
         assert_eq!(lex.next_token().kind, TokenKind::NotEq);
@@ -1281,7 +1361,7 @@ mod tests {
         assert_eq!(lex.next_token().kind, TokenKind::SemiColon);
         assert_eq!(lex.next_token().kind, TokenKind::Colon);
         assert_eq!(lex.next_token().kind, TokenKind::BackSlash);
-        assert_eq!(lex.next_token().kind, TokenKind::Eq);
+        assert_eq!(lex.next_token().kind, TokenKind::Assign);
         assert_eq!(lex.next_token().kind, TokenKind::Lt);
         assert_eq!(lex.next_token().kind, TokenKind::Gt);
         assert_eq!(lex.next_token().kind, TokenKind::Bang);
@@ -1356,27 +1436,51 @@ mod tests {
     }
 
     #[test]
+    fn test_invalid_numbers() {
+        let mut lex = Lexer::from_source("0x 0b102 0o89 0xGG 9xFF 123abc");
+
+        let t1 = lex.next_token();
+        assert_eq!(t1.kind, TokenKind::InvalidNumber);
+        assert_eq!(t1.source(), "0x");
+
+        let t2 = lex.next_token();
+        assert_eq!(t2.kind, TokenKind::InvalidNumber);
+        assert_eq!(t2.source(), "0b102");
+
+        let t3 = lex.next_token();
+        assert_eq!(t3.kind, TokenKind::InvalidNumber);
+        assert_eq!(t3.source(), "0o89");
+
+        let t4 = lex.next_token();
+        assert_eq!(t4.kind, TokenKind::InvalidNumber);
+        assert_eq!(t4.source(), "0xGG");
+
+        let t5 = lex.next_token();
+        assert_eq!(t5.kind, TokenKind::InvalidNumber);
+        assert_eq!(t5.source(), "9xFF");
+
+        let t6 = lex.next_token();
+        assert_eq!(t6.kind, TokenKind::InvalidNumber);
+        assert_eq!(t6.source(), "123abc");
+    }
+
+    #[test]
     fn test_number_base_conversions() {
         assert_eq!(NumberBase::B.radix(), 2);
         assert_eq!(NumberBase::O.radix(), 8);
         assert_eq!(NumberBase::D.radix(), 10);
         assert_eq!(NumberBase::X.radix(), 16);
 
-        assert_eq!(NumberBase::from(2), NumberBase::B);
-        assert_eq!(NumberBase::from(8), NumberBase::O);
-        assert_eq!(NumberBase::from(10), NumberBase::D);
-        assert_eq!(NumberBase::from(16), NumberBase::X);
+        assert_eq!(NumberBase::try_from(2), Ok(NumberBase::B));
+        assert_eq!(NumberBase::try_from(8), Ok(NumberBase::O));
+        assert_eq!(NumberBase::try_from(10), Ok(NumberBase::D));
+        assert_eq!(NumberBase::try_from(16), Ok(NumberBase::X));
+        assert_eq!(NumberBase::try_from(3), Err(NumberBaseError::UnknownBase));
 
         assert_eq!(u32::from(NumberBase::B), 2);
         assert_eq!(u32::from(NumberBase::O), 8);
         assert_eq!(u32::from(NumberBase::D), 10);
         assert_eq!(u32::from(NumberBase::X), 16);
-    }
-
-    #[test]
-    #[should_panic(expected = "Unkwon base")]
-    fn test_number_base_panic() {
-        let _ = NumberBase::from(3);
     }
 
     #[test]
@@ -1387,15 +1491,15 @@ mod tests {
         assert_eq!(t.source(), "\"hello\"");
         assert_eq!(t.unescape(), "hello");
 
-        let mut lex = Lexer::new("<test>", "\"hello\\nworld\"");
+        let mut lex = Lexer::new("<test>", "\"hello\\n\\t\\x41\\u{1F525}world\"");
         let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::StringLiteral);
-        assert_eq!(t.unescape(), "hello\nworld");
+        assert_eq!(t.unescape(), "hello\n\tA🔥world");
 
         let mut lex = Lexer::new("<test>", "\"hello\\x\"");
         let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::InvalidEscapeSequence);
-        assert_eq!(t.source(), "\"hello\\");
+        assert_eq!(t.source(), "\"hello\\x");
 
         let mut lex = Lexer::new("<test>", "\"hello");
         let t = lex.next_token();
@@ -1410,6 +1514,7 @@ mod tests {
         assert!(!token.is_eof());
         assert_eq!(format!("{}", loc), "<test>:5:10");
         assert_eq!(format!("{}", token), "foo");
+        assert_eq!(token.unescape(), "foo");
 
         let eof_token = Token::new(TokenKind::EOF, loc, "".into());
         assert!(eof_token.is_eof());
@@ -1436,13 +1541,14 @@ mod tests {
 
     #[test]
     fn test_is_assign_kind() {
+        assert!(TokenKind::ColonAssign.is_assign_kind());
         assert!(TokenKind::Assign.is_assign_kind());
-        assert!(TokenKind::Eq.is_assign_kind());
         assert!(TokenKind::PlusEq.is_assign_kind());
         assert!(TokenKind::MinusEq.is_assign_kind());
         assert!(TokenKind::AsteriskEq.is_assign_kind());
         assert!(TokenKind::SlashEq.is_assign_kind());
         assert!(TokenKind::ModEq.is_assign_kind());
+        assert!(!TokenKind::Eq.is_assign_kind());
         assert!(!TokenKind::Plus.is_assign_kind());
         assert!(!TokenKind::Identifier.is_assign_kind());
     }
@@ -1471,6 +1577,53 @@ mod tests {
         let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::OpenBracket);
         assert_eq!(t.source(), "[");
+
+        // Test savepoint interaction with peek()
+        let mut lex2 = Lexer::from_source("a b c");
+        let sp = lex2.save();
+        assert_eq!(lex2.next_token().source(), "a");
+        assert_eq!(lex2.peek().source(), "b");
+        lex2.restore(sp);
+        assert_eq!(lex2.next_token().source(), "a");
+
+        // Test save() after peek()
+        let mut lex3 = Lexer::from_source("x y");
+        assert_eq!(lex3.peek().source(), "x");
+        let sp3 = lex3.save();
+        assert_eq!(lex3.next_token().source(), "x");
+        assert_eq!(lex3.next_token().source(), "y");
+        lex3.restore(sp3);
+        assert_eq!(lex3.next_token().source(), "x");
+    }
+
+    #[test]
+    fn test_iterator_and_edge_cases() {
+        // Test Iterator implementation
+        let lex = Lexer::from_source("foo = 10");
+        let kinds: Vec<TokenKind> = lex.map(|t| t.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Identifier,
+                TokenKind::Assign,
+                TokenKind::Number(NumberBase::D),
+            ]
+        );
+
+        // Test comment and shebang at EOF without newline
+        let mut lex_comment = Lexer::from_source("abc // trailing comment without newline");
+        assert_eq!(lex_comment.next_token().source(), "abc");
+        assert_eq!(lex_comment.next_token().kind, TokenKind::EOF);
+
+        let mut lex_shebang = Lexer::from_source("#!/usr/bin/env bash");
+        assert_eq!(lex_shebang.next_token().kind, TokenKind::EOF);
+
+        // Test two dots followed by identifier (`..x`) is two Dots and Identifier, not Ellipsis
+        let mut lex_dots = Lexer::from_source("..x ...");
+        assert_eq!(lex_dots.next_token().kind, TokenKind::Dot);
+        assert_eq!(lex_dots.next_token().kind, TokenKind::Dot);
+        assert_eq!(lex_dots.next_token().source(), "x");
+        assert_eq!(lex_dots.next_token().kind, TokenKind::Ellipsis);
     }
 
     #[test]
@@ -1521,10 +1674,12 @@ mod tests {
         let t9 = lex.next_token();
         assert_eq!(t9.kind, TokenKind::CharacterLiteral);
         assert_eq!(t9.source(), "'\\x41'");
+        assert_eq!(t9.unescape(), "A");
 
         let t10 = lex.next_token();
         assert_eq!(t10.kind, TokenKind::CharacterLiteral);
         assert_eq!(t10.source(), "'\\u{1F525}'");
+        assert_eq!(t10.unescape(), "🔥");
     }
 
     #[test]
